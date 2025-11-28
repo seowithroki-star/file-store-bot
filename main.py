@@ -28,14 +28,14 @@ if not all([BOT_TOKEN, API_ID, API_HASH]):
 
 logger.info("✅ Configuration loaded successfully!")
 
-# Global variables
+# Global variables - MANUALLY SET YOUR CHANNEL IDs HERE
 user_data = {}
 app = None
 runner = None
 
-# Channel IDs - Will be detected automatically
-CHANNEL_ID = None
-FORCE_SUB_CHANNEL = None
+# MANUAL CHANNEL SETUP - Replace these with your actual channel IDs
+CHANNEL_ID = -1002491097530  # Replace with your MAIN channel ID
+FORCE_SUB_CHANNEL = -1003200571840  # Replace with your FORCE SUB channel ID
 
 async def start_web_server():
     """Start HTTP server for health checks"""
@@ -58,56 +58,51 @@ async def start_web_server():
     logger.info(f"🌐 Health check server running on port {port}")
     return runner
 
-async def detect_channels():
-    """Detect and verify channels"""
+async def verify_channels():
+    """Verify if channels are accessible"""
     global CHANNEL_ID, FORCE_SUB_CHANNEL
     
-    # Try to detect channels from common sources
-    test_channels = [
-        -1002491097530,  # Your main channel
-        -1003200571840,  # Your force sub channel
-    ]
+    channels_to_check = []
     
-    valid_channels = []
+    if CHANNEL_ID:
+        channels_to_check.append(("Main Channel", CHANNEL_ID))
+    if FORCE_SUB_CHANNEL:
+        channels_to_check.append(("Force Sub Channel", FORCE_SUB_CHANNEL))
     
-    for channel_id in test_channels:
+    accessible_channels = []
+    
+    for name, channel_id in channels_to_check:
         try:
             chat = await app.get_chat(channel_id)
-            valid_channels.append((channel_id, chat.title))
-            logger.info(f"✅ Found channel: {chat.title} ({channel_id})")
+            accessible_channels.append((name, channel_id, chat.title, True))
+            logger.info(f"✅ {name}: {chat.title} (ID: {channel_id})")
+            
+            # Check bot admin status
+            try:
+                bot_me = await app.get_me()
+                member = await app.get_chat_member(channel_id, bot_me.id)
+                logger.info(f"👑 Bot admin status in {name}: {member.status}")
+            except Exception as e:
+                logger.warning(f"⚠️ Bot may not be admin in {name}: {e}")
+                
         except Exception as e:
-            logger.warning(f"⚠️ Cannot access channel {channel_id}: {e}")
+            accessible_channels.append((name, channel_id, str(e), False))
+            logger.error(f"❌ {name} (ID: {channel_id}): {e}")
     
-    # Set channels if found
-    if len(valid_channels) >= 2:
-        CHANNEL_ID = valid_channels[0][0]
-        FORCE_SUB_CHANNEL = valid_channels[1][0]
-        logger.info(f"📢 Main channel set to: {CHANNEL_ID}")
-        logger.info(f"🔔 Force sub set to: {FORCE_SUB_CHANNEL}")
-    elif len(valid_channels) >= 1:
-        CHANNEL_ID = valid_channels[0][0]
-        logger.info(f"📢 Main channel set to: {CHANNEL_ID}")
-        logger.warning("⚠️ Only one channel found, force sub disabled")
-    else:
-        logger.error("❌ No valid channels found!")
-        return False
-    
-    return True
+    return accessible_channels
 
 async def check_subscription(user_id: int) -> bool:
-    """Check if user is subscribed"""
+    """Check if user is subscribed to force sub channel"""
     if not FORCE_SUB_CHANNEL:
-        logger.info("ℹ️ No force sub channel configured")
         return True
     
     try:
         member = await app.get_chat_member(FORCE_SUB_CHANNEL, user_id)
         is_subscribed = member.status not in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]
-        logger.info(f"🔍 User {user_id} subscription: {is_subscribed}")
         return is_subscribed
     except Exception as e:
         logger.error(f"❌ Subscription check failed: {e}")
-        # If we can't check, allow access temporarily
+        # Allow access if we can't check
         return True
 
 async def setup_bot():
@@ -129,7 +124,14 @@ async def setup_bot():
         
         logger.info(f"🚀 /start from {user_id} ({first_name})")
         
-        # Check subscription if force sub is configured
+        # Store user
+        user_data[user_id] = {
+            "name": first_name, 
+            "username": message.from_user.username,
+            "joined": "now"
+        }
+        
+        # Check force subscription if configured
         if FORCE_SUB_CHANNEL:
             is_subscribed = await check_subscription(user_id)
             
@@ -137,54 +139,62 @@ async def setup_bot():
                 try:
                     chat = await app.get_chat(FORCE_SUB_CHANNEL)
                     username = chat.username
-                    buttons = []
                     
+                    buttons = []
                     if username:
-                        buttons.append([InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{username}")])
+                        buttons.append([InlineKeyboardButton("📢 Join Our Channel", url=f"https://t.me/{username}")])
                     
                     buttons.append([InlineKeyboardButton("🔄 I've Joined", callback_data="check_sub")])
                     
                     await message.reply_text(
                         f"**Hello {first_name}!** 👋\n\n"
                         "📢 **Please join our channel to use this bot**\n\n"
-                        "1. Click the button below to join\n"
-                        "2. Then click 'I've Joined'",
+                        "1. Click the button below to join our channel\n"
+                        "2. Then click 'I've Joined' to verify\n"
+                        "3. Start using the bot!",
                         reply_markup=InlineKeyboardMarkup(buttons)
                     )
                     return
                 except Exception as e:
-                    logger.error(f"❌ Channel access error: {e}")
-                    # Continue without force sub if channel not accessible
+                    logger.error(f"❌ Force sub channel error: {e}")
+                    # Continue without force sub
         
-        # Welcome message (with or without force sub)
+        # Welcome message
+        welcome_text = f"**Welcome {first_name}!** 🎉\n\n"
+        
         if CHANNEL_ID:
-            welcome_text = (
-                f"**Welcome {first_name}!** 🎉\n\n"
-                "✅ **You're all set!**\n\n"
-                "🤖 **File Store Bot**\n"
+            welcome_text += (
+                "✅ **File Store Bot is Ready!**\n\n"
+                "🤖 **Features:**\n"
                 "• Store files in our channel\n"
-                "• Share files easily\n"
+                "• Easy file sharing\n"
                 "• Fast and reliable\n\n"
                 "📁 **Send me any file to get started!**"
             )
         else:
-            welcome_text = (
-                f"**Welcome {first_name}!** 🎉\n\n"
+            welcome_text += (
                 "🤖 **File Store Bot**\n\n"
-                "⚠️ **Note:** Channel configuration needed.\n"
-                "Please contact admin to setup file storage."
+                "⚠️ **Note:** File storage will be available soon.\n"
+                "You can still use other features!"
             )
+        
+        buttons = [
+            [InlineKeyboardButton("🔔 Updates", url="https://t.me/RHmovieHDOFFICIAL")],
+            [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")]
+        ]
+        
+        if CHANNEL_ID:
+            try:
+                chat = await app.get_chat(CHANNEL_ID)
+                if chat.username:
+                    buttons.append([InlineKeyboardButton("📂 View Files Channel", url=f"https://t.me/{chat.username}")])
+            except:
+                pass
         
         await message.reply_text(
             welcome_text,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔔 Updates", url="https://t.me/RHmovieHDOFFICIAL")],
-                [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")]
-            ])
+            reply_markup=InlineKeyboardMarkup(buttons)
         )
-        
-        # Store user
-        user_data[user_id] = {"name": first_name, "joined": "now"}
 
     @app.on_callback_query(filters.regex("check_sub"))
     async def check_sub_callback(client: Client, query):
@@ -193,7 +203,7 @@ async def setup_bot():
         if await check_subscription(user_id):
             await query.message.edit_text(
                 f"**Welcome {query.from_user.first_name}!** 🎉\n\n"
-                "✅ **Thank you for joining!**\n\n"
+                "✅ **Thank you for joining our channel!**\n\n"
                 "You can now use all bot features.\n"
                 "Send me any file to store in our channel!",
                 reply_markup=InlineKeyboardMarkup([
@@ -202,81 +212,107 @@ async def setup_bot():
                 ])
             )
         else:
-            await query.answer("❌ You haven't joined the channel yet!", show_alert=True)
+            await query.answer("❌ You haven't joined the channel yet! Please join first.", show_alert=True)
 
     @app.on_message(filters.command("help"))
     async def help_command(client: Client, message: Message):
-        await message.reply_text(
+        help_text = (
             "**Help Guide** 🤖\n\n"
             "**Commands:**\n"
             "/start - Start the bot\n"
-            "/help - This message\n"
-            "/stats - Bot stats (Admin)\n"
-            "/channels - Channel info\n\n"
-            "**How to use:**\n"
-            "Send any file to store in our channel!"
+            "/help - Show this help\n"
+            "/stats - Bot statistics\n"
+            "/channels - Channel status\n\n"
         )
+        
+        if CHANNEL_ID:
+            help_text += "**How to store files:**\nJust send me any file (document, video, photo, audio) and I'll store it in our channel!"
+        else:
+            help_text += "⚠️ **File storage is currently being configured.**"
+        
+        await message.reply_text(help_text)
 
-    @app.on_message(filters.command("stats") & filters.user(OWNER_ID))
+    @app.on_message(filters.command("stats"))
     async def stats_command(client: Client, message: Message):
         total_users = len(user_data)
-        channel_status = "✅ Configured" if CHANNEL_ID else "❌ Not configured"
+        
+        # Channel status
+        main_channel_status = "✅ Configured" if CHANNEL_ID else "❌ Not configured"
         force_sub_status = "✅ Configured" if FORCE_SUB_CHANNEL else "❌ Not configured"
         
-        await message.reply_text(
+        stats_text = (
             f"**📊 Bot Statistics**\n\n"
-            f"👥 Users: {total_users}\n"
-            f"📢 Main Channel: {channel_status}\n"
+            f"👥 Total Users: {total_users}\n"
+            f"📢 Main Channel: {main_channel_status}\n"
             f"🔔 Force Sub: {force_sub_status}\n"
-            f"👤 Owner: {OWNER_ID}\n"
-            f"✅ Status: Running"
+            f"👤 Your ID: `{message.from_user.id}`\n"
+            f"✅ Bot Status: Running"
         )
+        
+        await message.reply_text(stats_text)
 
     @app.on_message(filters.command("channels") & filters.user(OWNER_ID))
     async def channels_command(client: Client, message: Message):
-        """Check channel status"""
-        try:
-            channel_info = []
-            
-            if CHANNEL_ID:
-                try:
-                    chat = await app.get_chat(CHANNEL_ID)
-                    channel_info.append(f"✅ **Main Channel:** {chat.title} (ID: {CHANNEL_ID})")
-                except Exception as e:
-                    channel_info.append(f"❌ **Main Channel:** Cannot access (ID: {CHANNEL_ID}) - {e}")
+        """Detailed channel information for admin"""
+        accessible_channels = await verify_channels()
+        
+        response = "**📢 Channel Status Report**\n\n"
+        
+        for name, channel_id, info, is_accessible in accessible_channels:
+            if is_accessible:
+                response += f"✅ **{name}**\n"
+                response += f"   📢 Title: {info}\n"
+                response += f"   🆔 ID: `{channel_id}`\n"
             else:
-                channel_info.append("❌ **Main Channel:** Not configured")
-            
-            if FORCE_SUB_CHANNEL:
-                try:
-                    chat = await app.get_chat(FORCE_SUB_CHANNEL)
-                    channel_info.append(f"✅ **Force Sub:** {chat.title} (ID: {FORCE_SUB_CHANNEL})")
-                except Exception as e:
-                    channel_info.append(f"❌ **Force Sub:** Cannot access (ID: {FORCE_SUB_CHANNEL}) - {e}")
-            else:
-                channel_info.append("❌ **Force Sub:** Not configured")
-            
-            await message.reply_text("\n".join(channel_info))
-        except Exception as e:
-            await message.reply_text(f"❌ Error checking channels: {e}")
+                response += f"❌ **{name}**\n"
+                response += f"   🆔 ID: `{channel_id}`\n"
+                response += f"   📛 Error: {info}\n"
+        
+        if not accessible_channels:
+            response += "❌ No channels configured"
+        
+        await message.reply_text(response)
 
     @app.on_message(filters.private & filters.user(OWNER_ID) & (
         filters.document | filters.video | filters.audio | filters.photo))
     async def store_file(client: Client, message: Message):
         if not CHANNEL_ID:
-            await message.reply_text("❌ **Main channel not configured!**\nUse /channels to check status.")
+            await message.reply_text(
+                "❌ **Main channel not configured!**\n\n"
+                "Please configure the main channel ID first."
+            )
             return
         
         try:
-            await message.forward(CHANNEL_ID)
-            await message.reply_text("✅ **File stored successfully!**")
-            logger.info(f"📁 File stored by {message.from_user.id}")
+            # Forward file to main channel
+            forwarded_msg = await message.forward(CHANNEL_ID)
+            
+            # Get file link
+            chat = await app.get_chat(CHANNEL_ID)
+            if chat.username:
+                file_link = f"https://t.me/{chat.username}/{forwarded_msg.id}"
+            else:
+                file_link = f"Message ID: {forwarded_msg.id}"
+            
+            await message.reply_text(
+                "✅ **File stored successfully!**\n\n"
+                f"📁 File saved in: {chat.title}\n"
+                f"🔗 Access: {file_link}",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📂 View in Channel", url=file_link)
+                ]]) if chat.username else None
+            )
+            
+            logger.info(f"📁 File stored by {message.from_user.id} in channel {CHANNEL_ID}")
+            
         except Exception as e:
-            await message.reply_text(f"❌ **Error storing file!**\n{str(e)}")
+            error_msg = f"❌ **Error storing file!**\n\n{str(e)}"
+            await message.reply_text(error_msg)
             logger.error(f"File store error: {e}")
 
     @app.on_message(filters.private & ~filters.command(["start", "help", "stats", "channels"]))
     async def handle_other_messages(client: Client, message: Message):
+        # Check force subscription for non-command messages
         if FORCE_SUB_CHANNEL:
             is_subscribed = await check_subscription(message.from_user.id)
             if not is_subscribed:
@@ -286,15 +322,16 @@ async def setup_bot():
                 )
                 return
         
-        await message.reply_text(
-            "🤖 **Send me files to store!**\n\n"
-            "I can store:\n"
-            "• Documents\n" 
-            "• Videos\n"
-            "• Photos\n"
-            "• Audio files\n\n"
-            "Use /help for more info."
-        )
+        if message.text:
+            await message.reply_text(
+                "🤖 **Send me files to store!**\n\n"
+                "I can store:\n"
+                "• 📄 Documents\n" 
+                "• 🎥 Videos\n"
+                "• 🖼️ Photos\n"
+                "• 🎵 Audio files\n\n"
+                "Use /help for more information."
+            )
 
 async def main():
     """Main function"""
@@ -310,28 +347,38 @@ async def main():
         await setup_bot()
         await app.start()
         
-        # Detect channels
-        logger.info("🔍 Detecting channels...")
-        channels_ok = await detect_channels()
+        # Verify channels
+        logger.info("🔍 Verifying channels...")
+        accessible_channels = await verify_channels()
         
         bot = await app.get_me()
+        
+        # Display startup message
         print(f"""
 ╔══════════════════════╗
 ║     BOT IS LIVE!     ║
 ╠══════════════════════╣
-║ 🤖 @{bot.username}
+║ 🤖 Bot: @{bot.username}
 ║ 👤 Owner: {OWNER_ID}  
 ║ 📢 Main: {CHANNEL_ID or 'Not set'}
 ║ 🔔 Force Sub: {FORCE_SUB_CHANNEL or 'Not set'}
+║ 👥 Users: {len(user_data)}
 ║ 🌐 Port: {os.environ.get('PORT', 8080)}
 ║ ✅ Status: RUNNING
 ╚══════════════════════╝
 
-💡 Commands:
+💡 Available Commands:
 /start - Start bot
-/channels - Check channels (Admin)
-/stats - Bot statistics
+/stats - View statistics  
+/channels - Channel info (Admin)
+/help - Help guide
         """)
+        
+        # Show channel status
+        print("📢 Channel Status:")
+        for name, channel_id, info, is_accessible in accessible_channels:
+            status = "✅ ACCESSIBLE" if is_accessible else "❌ INACCESSIBLE"
+            print(f"   {name}: {status}")
         
         # Keep running
         await idle()
