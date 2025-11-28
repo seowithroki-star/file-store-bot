@@ -24,21 +24,38 @@ def get_int_env(key, default=0):
     except ValueError:
         raise ValueError(f"{key} must be an integer!")
 
+def get_required_int_env(key):
+    """Get required integer environment variable"""
+    value = os.environ.get(key)
+    if not value:
+        raise ValueError(f"Environment variable {key} is required!")
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError(f"{key} must be an integer!")
+
+def get_required_env(key):
+    """Get required environment variable"""
+    value = os.environ.get(key)
+    if not value:
+        raise ValueError(f"Environment variable {key} is required!")
+    return value
+
 # Required variables
-BOT_TOKEN = get_env_var("BOT_TOKEN", required=True)
-API_ID = get_int_env("API_ID", required=True)
-API_HASH = get_env_var("API_HASH", required=True)
+BOT_TOKEN = get_required_env("BOT_TOKEN")
+API_ID = get_required_int_env("API_ID")
+API_HASH = get_required_env("API_HASH")
 
 # Koyeb uses PORT environment variable
-PORT = int(os.environ.get("PORT", 8080))
+PORT = int(os.environ.get("PORT", "8080"))
 
 # Optional variables
 OWNER_ID = get_int_env("OWNER_ID", 7945670631)
 DB_URL = get_env_var("DB_URL", "")
 DB_NAME = get_env_var("DB_NAME", "file_store_bot")
 
-# Channels
-CHANNEL_ID = get_int_env("CHANNEL_ID", -1003200571840)
+# Channels - YOUR CHANNEL IDs
+CHANNEL_ID = get_int_env("CHANNEL_ID", -1002491097530)  # Your main channel
 
 def get_channel_id(env_var, default=0):
     value = os.environ.get(env_var)
@@ -49,7 +66,7 @@ def get_channel_id(env_var, default=0):
     except ValueError:
         return None
 
-FORCE_SUB_CHANNEL_1 = get_channel_id("FORCE_SUB_CHANNEL_1", -1002491097530)
+FORCE_SUB_CHANNEL_1 = get_channel_id("FORCE_SUB_CHANNEL_1", -1003200571840)  # Your force sub channel
 FORCE_SUB_CHANNEL_2 = get_channel_id("FORCE_SUB_CHANNEL_2")
 FORCE_SUB_CHANNEL_3 = get_channel_id("FORCE_SUB_CHANNEL_3")
 FORCE_SUB_CHANNEL_4 = get_channel_id("FORCE_SUB_CHANNEL_4")
@@ -195,10 +212,7 @@ async def start_command(client: Client, message: Message):
         
         if FORCE_SUB_CHANNEL_1:
             channel_username = await get_channel_username(FORCE_SUB_CHANNEL_1)
-            buttons.append([InlineKeyboardButton("📢 Channel 1", url=f"https://t.me/{channel_username}")])
-        if FORCE_SUB_CHANNEL_2:
-            channel_username = await get_channel_username(FORCE_SUB_CHANNEL_2)
-            buttons.append([InlineKeyboardButton("📢 Channel 2", url=f"https://t.me/{channel_username}")])
+            buttons.append([InlineKeyboardButton("📢 Join Our Channel", url=f"https://t.me/{channel_username}")])
         
         buttons.append([InlineKeyboardButton("🔄 Try Again", callback_data="check_sub")])
         
@@ -238,7 +252,7 @@ async def check_sub_callback(client: Client, query: CallbackQuery):
             ]])
         )
     else:
-        await query.answer("❌ Please join all channels first!", show_alert=True)
+        await query.answer("❌ Please join our channel first!", show_alert=True)
 
 @app.on_callback_query(filters.regex("about"))
 async def about_callback(client: Client, query: CallbackQuery):
@@ -289,20 +303,101 @@ async def stats_command(client: Client, message: Message):
 <b>👥 Total Users:</b> {total_users}
 <b>📁 Total Files:</b> {total_files}
 <b>🛠️ Admin Count:</b> {len(ADMINS)}
+<b>📢 Force Sub Channel:</b> {FORCE_SUB_CHANNEL_1 if FORCE_SUB_CHANNEL_1 else "Not set"}
 <b>🌐 Port:</b> {PORT}
 """
     
     await message.reply_text(stats_text)
 
+# Broadcast command for owner
+@app.on_message(filters.command("broadcast") & filters.private & filters.user(ADMINS))
+async def broadcast_command(client: Client, message: Message):
+    if not users_collection:
+        await message.reply_text("❌ Database not configured!")
+        return
+    
+    if len(message.command) < 2:
+        await message.reply_text("Usage: /broadcast <message>")
+        return
+    
+    broadcast_msg = message.text.split(None, 1)[1]
+    total_users = users_collection.count_documents({})
+    
+    if total_users == 0:
+        await message.reply_text("❌ No users found in database!")
+        return
+    
+    processing_msg = await message.reply_text(f"📢 Starting broadcast to {total_users} users...")
+    
+    success = 0
+    failed = 0
+    users = users_collection.find()
+    
+    for user in users:
+        try:
+            await client.send_message(chat_id=user["user_id"], text=broadcast_msg)
+            success += 1
+        except Exception as e:
+            failed += 1
+            logger.error(f"Failed to send to {user['user_id']}: {e}")
+        
+        # Small delay to avoid flooding
+        await asyncio.sleep(0.1)
+    
+    await processing_msg.edit_text(
+        f"📊 Broadcast Completed!\n\n"
+        f"✅ Success: {success}\n"
+        f"❌ Failed: {failed}\n"
+        f"📋 Total: {total_users}"
+    )
+
+# File store functionality - Admin can forward files to channel
+@app.on_message(filters.private & filters.user(ADMINS) & (filters.document | filters.video | filters.audio | filters.photo))
+async def store_file(client: Client, message: Message):
+    """Store files sent by admins"""
+    if not CHANNEL_ID:
+        await message.reply_text("❌ CHANNEL_ID not configured!")
+        return
+    
+    try:
+        # Forward file to channel
+        forwarded_msg = await message.forward(CHANNEL_ID)
+        
+        # Save to database
+        if files_collection:
+            files_collection.insert_one({
+                "file_id": forwarded_msg.id,
+                "message_id": forwarded_msg.id,
+                "chat_id": CHANNEL_ID,
+                "file_type": message.media.value if message.media else "document",
+                "date": datetime.now(),
+                "admin_id": message.from_user.id
+            })
+        
+        file_link = f"https://t.me/c/{str(CHANNEL_ID)[4:]}/{forwarded_msg.id}"
+        
+        await message.reply_text(
+            f"✅ File stored successfully!\n\n"
+            f"📁 File ID: `{forwarded_msg.id}`\n"
+            f"🔗 Direct Link: {file_link}",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📂 View in Channel", url=file_link)
+            ]])
+        )
+        
+    except Exception as e:
+        await message.reply_text(f"❌ Error storing file: {e}")
+        logger.error(f"File storage error: {e}")
+
 # Simple HTTP server for health checks
 async def start_web_server():
     try:
         from aiohttp import web
-        app_web = web.Application()
         
         async def health_check(request):
             return web.Response(text="🤖 Bot is running!")
         
+        app_web = web.Application()
         app_web.router.add_get('/', health_check)
         app_web.router.add_get('/health', health_check)
         
@@ -324,18 +419,8 @@ async def main():
     logger.info("🚀 Starting File Store Bot...")
     
     # Validate configuration
-    required_vars = {
-        "BOT_TOKEN": BOT_TOKEN,
-        "API_ID": API_ID,
-        "API_HASH": API_HASH
-    }
-    
-    for name, value in required_vars.items():
-        if not value:
-            logger.error(f"❌ {name} is required!")
-            sys.exit(1)
-    
-    logger.info("✅ Configuration validated successfully!")
+    logger.info(f"📢 Main Channel ID: {CHANNEL_ID}")
+    logger.info(f"📢 Force Sub Channel ID: {FORCE_SUB_CHANNEL_1}")
     
     # Start web server for health checks
     web_runner = await start_web_server()
@@ -353,6 +438,8 @@ async def main():
 ║ 🤖 Bot: @{bot_info.username}
 ║ 👤 Owner: {OWNER_ID}
 ║ 👥 Admins: {len(ADMINS)}
+║ 📢 Main Channel: {CHANNEL_ID}
+║ 📢 Force Sub: {FORCE_SUB_CHANNEL_1}
 ║ 🌐 Port: {PORT}
 ║ 🚀 Host: Koyeb
 ╚══════════════════════╝
