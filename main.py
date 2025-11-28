@@ -28,14 +28,12 @@ if not all([BOT_TOKEN, API_ID, API_HASH]):
 
 logger.info("✅ Configuration loaded successfully!")
 
-# Global variables
+# Global variables - WILL BE CREATED AUTOMATICALLY
 user_data = {}
 app = None
 runner = None
-
-# YOUR CHANNEL IDs - REPLACE WITH ACTUAL IDs
-CHANNEL_ID = -1002491097530      # Main channel for storing files
-FORCE_SUB_CHANNEL = -1003200571840  # Channel users must join
+CHANNEL_ID = None
+FORCE_SUB_CHANNEL = None
 
 async def start_web_server():
     """Start HTTP server for health checks"""
@@ -58,38 +56,53 @@ async def start_web_server():
     logger.info(f"🌐 Health check server running on port {port}")
     return runner
 
-async def verify_channel_access(channel_id, channel_name):
-    """Verify if bot can access and post in channel"""
+async def create_channels():
+    """Automatically create channels if they don't exist"""
+    global CHANNEL_ID, FORCE_SUB_CHANNEL
+    
+    bot = await app.get_me()
+    
+    # Create main file storage channel
     try:
-        # Get channel info
-        chat = await app.get_chat(channel_id)
-        logger.info(f"✅ {channel_name} found: {chat.title}")
+        main_chat = await app.create_supergroup(
+            title="📁 File Storage",
+            description=f"Files stored by @{bot.username}"
+        )
+        CHANNEL_ID = main_chat.id
+        logger.info(f"✅ Created main channel: {CHANNEL_ID}")
         
-        # Check if bot is admin
-        bot_me = await app.get_me()
+        # Try to set username
         try:
-            member = await app.get_chat_member(channel_id, bot_me.id)
-            if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-                logger.info(f"✅ Bot is admin in {channel_name}")
-                
-                # Check if bot can post messages
-                if member.privileges and member.privileges.can_post_messages:
-                    logger.info(f"✅ Bot can post messages in {channel_name}")
-                    return True, chat, "Can post messages"
-                else:
-                    logger.warning(f"⚠️ Bot cannot post messages in {channel_name}")
-                    return False, chat, "No post permission"
-            else:
-                logger.error(f"❌ Bot is NOT admin in {channel_name}")
-                return False, chat, "Not admin"
-                
-        except Exception as e:
-            logger.error(f"❌ Admin check failed for {channel_name}: {e}")
-            return False, chat, f"Admin check failed: {e}"
+            await app.set_chat_username(CHANNEL_ID, f"files_{bot.username}")
+            logger.info(f"✅ Set main channel username")
+        except:
+            logger.warning("⚠️ Could not set main channel username")
             
     except Exception as e:
-        logger.error(f"❌ Cannot access {channel_name}: {e}")
-        return False, None, f"Access failed: {e}"
+        logger.error(f"❌ Failed to create main channel: {e}")
+        return False
+    
+    # Create force subscription channel  
+    try:
+        force_chat = await app.create_supergroup(
+            title="🔔 Join Our Channel",
+            description="Join to use the file storage bot"
+        )
+        FORCE_SUB_CHANNEL = force_chat.id
+        logger.info(f"✅ Created force sub channel: {FORCE_SUB_CHANNEL}")
+        
+        # Try to set username
+        try:
+            await app.set_chat_username(FORCE_SUB_CHANNEL, f"join_{bot.username}")
+            logger.info(f"✅ Set force sub channel username")
+        except:
+            logger.warning("⚠️ Could not set force sub channel username")
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to create force sub channel: {e}")
+        # Continue with just main channel
+    
+    return True
 
 async def check_subscription(user_id: int) -> bool:
     """Check if user is subscribed to force sub channel"""
@@ -98,11 +111,10 @@ async def check_subscription(user_id: int) -> bool:
     
     try:
         member = await app.get_chat_member(FORCE_SUB_CHANNEL, user_id)
-        is_subscribed = member.status not in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]
-        return is_subscribed
+        return member.status not in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]
     except Exception as e:
         logger.error(f"❌ Subscription check failed: {e}")
-        return True  # Allow access if check fails
+        return True
 
 async def setup_bot():
     """Setup bot handlers"""
@@ -130,6 +142,17 @@ async def setup_bot():
             "joined": "now"
         }
         
+        # Create channels if not exists
+        if not CHANNEL_ID:
+            await message.reply_text("🔄 Creating channels... Please wait!")
+            success = await create_channels()
+            if not success:
+                await message.reply_text(
+                    "❌ Failed to create channels!\n\n"
+                    "Please try again or contact support."
+                )
+                return
+        
         # Check force subscription
         if FORCE_SUB_CHANNEL:
             is_subscribed = await check_subscription(user_id)
@@ -141,7 +164,7 @@ async def setup_bot():
                     
                     buttons = []
                     if username:
-                        buttons.append([InlineKeyboardButton("📢 Join Our Channel", url=f"https://t.me/{username}")])
+                        buttons.append([InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{username}")])
                     
                     buttons.append([InlineKeyboardButton("🔄 I've Joined", callback_data="check_sub")])
                     
@@ -150,47 +173,27 @@ async def setup_bot():
                         "📢 **Please join our channel to use this bot**\n\n"
                         "1. Click the button below to join\n"
                         "2. Then click 'I've Joined'\n"
-                        "3. Start using the bot!",
+                        "3. Start storing files!",
                         reply_markup=InlineKeyboardMarkup(buttons)
                     )
                     return
                 except Exception as e:
                     logger.error(f"❌ Force sub error: {e}")
+                    # Continue without force sub
         
         # Welcome message
-        welcome_text = f"**Welcome {first_name}!** 🎉\n\n"
-        
-        # Check main channel access
-        main_accessible, main_chat, main_status = await verify_channel_access(CHANNEL_ID, "Main Channel")
-        
-        if main_accessible:
-            welcome_text += (
-                "✅ **File Store Bot is Ready!**\n\n"
-                "🤖 **Features:**\n"
-                "• Store files in channel\n"
-                "• Easy file sharing\n"
-                "• Direct file links\n\n"
-                "📁 **Send me any file to get started!**"
-            )
-        else:
-            welcome_text += (
-                "🤖 **File Store Bot**\n\n"
-                "⚠️ **File storage temporarily unavailable**\n"
-                "Channel configuration in progress.\n"
-                "You can still test other features!"
-            )
-        
-        buttons = [
-            [InlineKeyboardButton("🔔 Updates", url="https://t.me/RHmovieHDOFFICIAL")],
-            [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")]
-        ]
-        
-        if main_accessible and main_chat and main_chat.username:
-            buttons.append([InlineKeyboardButton("📂 Files Channel", url=f"https://t.me/{main_chat.username}")])
-        
         await message.reply_text(
-            welcome_text,
-            reply_markup=InlineKeyboardMarkup(buttons)
+            f"**Welcome {first_name}!** 🎉\n\n"
+            "✅ **File Store Bot is Ready!**\n\n"
+            "🤖 **Features:**\n"
+            "• Store files in our channel\n"
+            "• Easy file sharing\n"
+            "• Direct file links\n\n"
+            "📁 **Send me any file to get started!**",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔔 Updates", url="https://t.me/RHmovieHDOFFICIAL")],
+                [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")]
+            ])
         )
 
     @app.on_callback_query(filters.regex("check_sub"))
@@ -211,65 +214,46 @@ async def setup_bot():
         else:
             await query.answer("❌ Please join the channel first!", show_alert=True)
 
-    @app.on_message(filters.command("test") & filters.user(OWNER_ID))
-    async def test_command(client: Client, message: Message):
-        """Test channel access"""
-        await message.reply_text("🔍 Testing channel access...")
+    @app.on_message(filters.command("setup") & filters.user(OWNER_ID))
+    async def setup_command(client: Client, message: Message):
+        """Recreate channels"""
+        await message.reply_text("🔄 Recreating channels...")
         
-        # Test main channel
-        main_accessible, main_chat, main_status = await verify_channel_access(CHANNEL_ID, "Main Channel")
+        global CHANNEL_ID, FORCE_SUB_CHANNEL
+        CHANNEL_ID = None
+        FORCE_SUB_CHANNEL = None
         
-        response = "**📢 Channel Test Results**\n\n"
-        response += f"**Main Channel:** {main_status}\n"
-        
-        if main_accessible:
-            # Try to send a test message
-            try:
-                test_msg = await client.send_message(CHANNEL_ID, "🤖 Bot test message")
-                response += f"✅ Test message sent! ID: {test_msg.id}\n"
-                
-                if main_chat.username:
-                    link = f"https://t.me/{main_chat.username}/{test_msg.id}"
-                    response += f"🔗 Link: {link}\n"
-            except Exception as e:
-                response += f"❌ Cannot send message: {e}\n"
-        
-        await message.reply_text(response)
+        success = await create_channels()
+        if success:
+            await message.reply_text("✅ Channels created successfully!")
+        else:
+            await message.reply_text("❌ Failed to create channels!")
 
     @app.on_message(filters.private & filters.user(OWNER_ID) & (
         filters.document | filters.video | filters.audio | filters.photo))
     async def store_file(client: Client, message: Message):
         """Store files in channel"""
-        # Verify channel access first
-        main_accessible, main_chat, main_status = await verify_channel_access(CHANNEL_ID, "Main Channel")
-        
-        if not main_accessible:
+        if not CHANNEL_ID:
             await message.reply_text(
-                f"❌ **Cannot access main channel!**\n\n"
-                f"Error: {main_status}\n\n"
-                "Please check:\n"
-                "1. Bot is admin in channel\n"
-                "2. Bot has 'Post Messages' permission\n"
-                "3. Channel ID is correct"
+                "❌ **Channels not created yet!**\n\n"
+                "Please use /start first to create channels automatically."
             )
             return
         
         try:
-            logger.info(f"📁 Attempting to store file from {message.from_user.id}")
-            
             # Forward file to channel
             forwarded_msg = await message.forward(CHANNEL_ID)
-            logger.info(f"✅ File forwarded to channel, message ID: {forwarded_msg.id}")
             
-            # Create file link
+            # Get channel info for link
+            chat = await app.get_chat(CHANNEL_ID)
             file_link = None
-            if main_chat and main_chat.username:
-                file_link = f"https://t.me/{main_chat.username}/{forwarded_msg.id}"
+            if chat.username:
+                file_link = f"https://t.me/{chat.username}/{forwarded_msg.id}"
             
-            # Send success message
+            # Success message
             success_text = (
                 "✅ **File stored successfully!**\n\n"
-                f"📁 **Channel:** {main_chat.title if main_chat else 'Unknown'}\n"
+                f"📁 **Channel:** {chat.title}\n"
                 f"🆔 **Message ID:** `{forwarded_msg.id}`\n"
             )
             
@@ -286,52 +270,64 @@ async def setup_bot():
                 disable_web_page_preview=True
             )
             
-            logger.info(f"📁 File stored successfully by {message.from_user.id}")
+            logger.info(f"📁 File stored by {message.from_user.id} in channel {CHANNEL_ID}")
             
         except Exception as e:
-            error_msg = f"❌ **Error storing file!**\n\nError: {str(e)}"
-            await message.reply_text(error_msg)
+            await message.reply_text(f"❌ **Error storing file!**\n\nError: {str(e)}")
             logger.error(f"File store error: {e}")
+
+    @app.on_message(filters.command("channels"))
+    async def channels_command(client: Client, message: Message):
+        """Show channel information"""
+        if not CHANNEL_ID:
+            await message.reply_text("❌ No channels created yet. Use /start first.")
+            return
+        
+        try:
+            main_chat = await app.get_chat(CHANNEL_ID)
+            response = "**📢 Channel Information**\n\n"
+            response += f"**Main Channel:**\n"
+            response += f"📢 {main_chat.title}\n"
+            response += f"🆔 `{main_chat.id}`\n"
+            
+            if main_chat.username:
+                response += f"👤 @{main_chat.username}\n"
+                response += f"🔗 https://t.me/{main_chat.username}\n"
+            
+            if FORCE_SUB_CHANNEL:
+                try:
+                    force_chat = await app.get_chat(FORCE_SUB_CHANNEL)
+                    response += f"\n**Force Sub Channel:**\n"
+                    response += f"📢 {force_chat.title}\n"
+                    response += f"🆔 `{force_chat.id}`\n"
+                    
+                    if force_chat.username:
+                        response += f"👤 @{force_chat.username}\n"
+                        response += f"🔗 https://t.me/{force_chat.username}\n"
+                        
+                except Exception as e:
+                    response += f"\n**Force Sub:** ❌ {e}\n"
+            
+            await message.reply_text(response)
+            
+        except Exception as e:
+            await message.reply_text(f"❌ Error getting channel info: {e}")
 
     @app.on_message(filters.command("help"))
     async def help_command(client: Client, message: Message):
         help_text = (
             "**Help Guide** 🤖\n\n"
             "**Commands:**\n"
-            "/start - Start the bot\n"
+            "/start - Start bot & create channels\n"
             "/help - Show this help\n"
-            "/stats - Bot statistics\n"
-            "/test - Test channel (Admin)\n\n"
+            "/channels - Show channel info\n"
+            "/setup - Recreate channels (Owner)\n\n"
+            "**How to use:**\n"
+            "1. Use /start to create channels\n"
+            "2. Join the force sub channel\n"
+            "3. Send any file to store it!"
         )
-        
-        main_accessible, _, _ = await verify_channel_access(CHANNEL_ID, "Main Channel")
-        if main_accessible:
-            help_text += "**To store files:**\nJust send me any file (document, video, photo, audio)"
-        else:
-            help_text += "⚠️ **File storage:** Currently being configured"
-        
         await message.reply_text(help_text)
-
-    @app.on_message(filters.command("stats"))
-    async def stats_command(client: Client, message: Message):
-        total_users = len(user_data)
-        
-        main_accessible, _, main_status = await verify_channel_access(CHANNEL_ID, "Main Channel")
-        force_accessible, _, force_status = await verify_channel_access(FORCE_SUB_CHANNEL, "Force Sub")
-        
-        main_status_display = "✅ Accessible" if main_accessible else f"❌ {main_status}"
-        force_status_display = "✅ Accessible" if force_accessible else f"❌ {force_status}"
-        
-        stats_text = (
-            f"**📊 Bot Statistics**\n\n"
-            f"👥 Total Users: {total_users}\n"
-            f"📢 Main Channel: {main_status_display}\n"
-            f"🔔 Force Sub: {force_status_display}\n"
-            f"👤 Your ID: `{message.from_user.id}`\n"
-            f"✅ Status: Running"
-        )
-        
-        await message.reply_text(stats_text)
 
 async def main():
     """Main function"""
@@ -347,34 +343,28 @@ async def main():
         await setup_bot()
         await app.start()
         
-        # Verify channels on startup
-        logger.info("🔍 Verifying channel access...")
-        main_accessible, main_chat, main_status = await verify_channel_access(CHANNEL_ID, "Main Channel")
-        force_accessible, force_chat, force_status = await verify_channel_access(FORCE_SUB_CHANNEL, "Force Sub")
-        
         bot = await app.get_me()
         
-        # Display startup message
         print(f"""
 ╔══════════════════════╗
 ║     BOT IS LIVE!     ║
 ╠══════════════════════╣
 ║ 🤖 Bot: @{bot.username}
 ║ 👤 Owner: {OWNER_ID}  
-║ 📢 Main: {CHANNEL_ID}
-║ 🔔 Force Sub: {FORCE_SUB_CHANNEL}
+║ 📢 Main: {'✅ READY' if CHANNEL_ID else '❌ NOT CREATED'}
+║ 🔔 Force Sub: {'✅ READY' if FORCE_SUB_CHANNEL else '❌ NOT CREATED'}
 ║ 👥 Users: {len(user_data)}
 ║ ✅ Status: RUNNING
 ╚══════════════════════╝
 
-📢 Channel Status:
-   Main: {'✅ ACCESSIBLE' if main_accessible else '❌ INACCESSIBLE'}
-   Force Sub: {'✅ ACCESSIBLE' if force_accessible else '❌ INACCESSIBLE'}
+💡 Instructions:
+1. Send /start to create channels
+2. Join the force sub channel  
+3. Start storing files!
 
-💡 Commands:
-/start - Start bot
-/test - Test channels (Admin)  
-/stats - View statistics
+📋 Commands:
+/start - Create channels & start
+/channels - Show channel info
 /help - Help guide
         """)
         
