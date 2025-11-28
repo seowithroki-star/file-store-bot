@@ -32,7 +32,7 @@ DB_URL = get_env_var("DB_URL", "")
 DB_NAME = get_env_var("DB_NAME", "file_store_bot")
 
 # Channels
-CHANNEL_ID = get_int_env("CHANNEL_ID", -1003094784222)
+CHANNEL_ID = get_int_env("CHANNEL_ID", -1002491097530)
 
 def get_channel_id(env_var, default=0):
     value = os.environ.get(env_var)
@@ -43,7 +43,7 @@ def get_channel_id(env_var, default=0):
     except ValueError:
         return None
 
-FORCE_SUB_CHANNEL_1 = get_channel_id("FORCE_SUB_CHANNEL_1", -1003056865925)
+FORCE_SUB_CHANNEL_1 = get_channel_id("FORCE_SUB_CHANNEL_1", -1002491097530)
 FORCE_SUB_CHANNEL_2 = get_channel_id("FORCE_SUB_CHANNEL_2")
 FORCE_SUB_CHANNEL_3 = get_channel_id("FORCE_SUB_CHANNEL_3")
 FORCE_SUB_CHANNEL_4 = get_channel_id("FORCE_SUB_CHANNEL_4")
