@@ -1,7 +1,7 @@
 import os
 import asyncio
 import logging
-from pyrogram import Client, filters, idle
+from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.enums import ParseMode, ChatMemberStatus
 from pymongo import MongoClient
@@ -19,10 +19,9 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Configuration with debug
+# Configuration
 def get_env_var(key, default="", required=False):
     value = os.environ.get(key, default)
-    logger.info(f"🔧 Loading {key}: {value if not 'TOKEN' in key and not 'HASH' in key else '***'}")
     if required and not value:
         raise ValueError(f"❌ {key} is required!")
     return value
@@ -57,26 +56,22 @@ DB_NAME = get_env_var("DB_NAME", "file_store_bot")
 # Your Channel IDs
 CHANNEL_ID = get_int_env("CHANNEL_ID", -1002491097530)  # Main channel
 FORCE_SUB_CHANNEL_1 = get_int_env("FORCE_SUB_CHANNEL_1", -1003200571840)  # Force sub channel
-FORCE_SUB_CHANNEL_2 = get_int_env("FORCE_SUB_CHANNEL_2", 0)
-FORCE_SUB_CHANNEL_3 = get_int_env("FORCE_SUB_CHANNEL_3", 0)
-FORCE_SUB_CHANNEL_4 = get_int_env("FORCE_SUB_CHANNEL_4", 0)
 
 # Other settings
 START_PIC = get_env_var("START_PIC", "https://files.catbox.moe/ufzpkn.jpg")
 F_PIC = get_env_var("FORCE_PIC", "https://files.catbox.moe/ufzpkn.jpg")
 
 # Admins
+ADMINS = [OWNER_ID]
 try:
-    ADMINS = [OWNER_ID]
     admins_str = os.environ.get("ADMINS", "")
     if admins_str:
         additional_admins = [int(x.strip()) for x in admins_str.split() if x.strip()]
         ADMINS.extend(additional_admins)
     ADMINS = list(dict.fromkeys(ADMINS))
-    logger.info(f"👥 Admins loaded: {ADMINS}")
-except ValueError as e:
-    logger.error(f"❌ Error loading admins: {e}")
-    ADMINS = [OWNER_ID]
+    logger.info(f"👥 Admins: {ADMINS}")
+except ValueError:
+    logger.error("❌ Error loading additional admins")
 
 # Bot messages
 START_MSG = get_env_var("START_MESSAGE", "🤖 <b>Hello {first}!</b>\n\nI am a File Store Bot. Send me any file and I'll store it in the channel!")
@@ -101,20 +96,16 @@ else:
     users_collection = None
     files_collection = None
 
-# Pyrogram Client with better error handling
-try:
-    app = Client(
-        "file_store_bot",
-        api_id=API_ID,
-        api_hash=API_HASH,
-        bot_token=BOT_TOKEN,
-        sleep_threshold=60,
-        workers=3
-    )
-    logger.info("✅ Pyrogram client created successfully!")
-except Exception as e:
-    logger.error(f"❌ Failed to create Pyrogram client: {e}")
-    sys.exit(1)
+# Pyrogram Client with NO web server conflict
+app = Client(
+    "file_store_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    sleep_threshold=60,
+    workers=3,
+    in_memory=True  # Important for Koyeb
+)
 
 start_time = time.time()
 
@@ -127,30 +118,17 @@ def get_uptime():
 
 async def is_subscribed(user_id: int):
     """Check if user is subscribed to force sub channels"""
-    force_channels = [FORCE_SUB_CHANNEL_1, FORCE_SUB_CHANNEL_2, FORCE_SUB_CHANNEL_3, FORCE_SUB_CHANNEL_4]
-    active_channels = [channel for channel in force_channels if channel]
-    
-    if not active_channels:
-        logger.info(f"✅ No force sub channels, allowing user {user_id}")
+    if not FORCE_SUB_CHANNEL_1:
         return True
     
-    logger.info(f"🔍 Checking subscription for user {user_id} in channels: {active_channels}")
-    
-    for channel_id in active_channels:
-        try:
-            member = await app.get_chat_member(channel_id, user_id)
-            logger.info(f"📋 User {user_id} status in channel {channel_id}: {member.status}")
-            
-            if member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
-                logger.info(f"❌ User {user_id} not subscribed to channel {channel_id}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Error checking user {user_id} in channel {channel_id}: {e}")
+    try:
+        member = await app.get_chat_member(FORCE_SUB_CHANNEL_1, user_id)
+        if member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
             return False
-    
-    logger.info(f"✅ User {user_id} is subscribed to all channels")
-    return True
+        return True
+    except Exception as e:
+        logger.error(f"❌ Error checking subscription for {user_id}: {e}")
+        return False
 
 # Start command handler
 @app.on_message(filters.command("start") & filters.private)
@@ -158,7 +136,7 @@ async def start_command(client: Client, message: Message):
     user_id = message.from_user.id
     first_name = message.from_user.first_name
     
-    logger.info(f"🚀 /start command from user {user_id} ({first_name})")
+    logger.info(f"🚀 /start command from {user_id} ({first_name})")
     
     # Save user to database
     if users_collection:
@@ -172,13 +150,11 @@ async def start_command(client: Client, message: Message):
                 }},
                 upsert=True
             )
-            logger.info(f"💾 User {user_id} saved to database")
         except Exception as e:
-            logger.error(f"❌ Error saving user {user_id} to database: {e}")
+            logger.error(f"❌ Database error: {e}")
     
     # Check subscription
     is_sub = await is_subscribed(user_id)
-    logger.info(f"📊 Subscription check for {user_id}: {is_sub}")
     
     if not is_sub:
         # Force subscribe message
@@ -187,52 +163,36 @@ async def start_command(client: Client, message: Message):
             try:
                 chat = await app.get_chat(FORCE_SUB_CHANNEL_1)
                 username = chat.username
-                invite_link = f"https://t.me/{username}" if username else None
-                
-                if invite_link:
-                    buttons.append([InlineKeyboardButton("📢 Join Channel", url=invite_link)])
-                else:
-                    logger.warning("⚠️ Force sub channel has no username or invite link")
+                if username:
+                    buttons.append([InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{username}")])
             except Exception as e:
-                logger.error(f"❌ Error getting channel info: {e}")
+                logger.error(f"❌ Error getting channel: {e}")
         
         buttons.append([InlineKeyboardButton("🔄 Try Again", callback_data="check_sub")])
         
-        try:
-            await message.reply_photo(
-                photo=F_PIC,
-                caption=FORCE_MSG.format(first=first_name),
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
-            logger.info(f"📨 Sent force sub message to user {user_id}")
-        except Exception as e:
-            logger.error(f"❌ Error sending force sub message: {e}")
-            await message.reply_text(FORCE_MSG.format(first=first_name))
+        await message.reply_photo(
+            photo=F_PIC,
+            caption=FORCE_MSG.format(first=first_name),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
         return
     
-    # User is subscribed
-    try:
-        await message.reply_photo(
-            photo=START_PIC,
-            caption=START_MSG.format(first=first_name),
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔔 Updates", url="https://t.me/RHmovieHDOFFICIAL"),
-                InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
-            ], [
-                InlineKeyboardButton("📊 Stats", callback_data="stats"),
-                InlineKeyboardButton("ℹ️ About", callback_data="about")
-            ]])
-        )
-        logger.info(f"✅ Sent welcome message to user {user_id}")
-    except Exception as e:
-        logger.error(f"❌ Error sending welcome message: {e}")
-        await message.reply_text(START_MSG.format(first=first_name))
+    # User is subscribed - show welcome
+    await message.reply_photo(
+        photo=START_PIC,
+        caption=START_MSG.format(first=first_name),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔔 Updates", url="https://t.me/RHmovieHDOFFICIAL"),
+            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
+        ], [
+            InlineKeyboardButton("ℹ️ About", callback_data="about")
+        ]])
+    )
 
 # Callback handlers
 @app.on_callback_query(filters.regex("check_sub"))
 async def check_sub_callback(client: Client, query: CallbackQuery):
     user_id = query.from_user.id
-    logger.info(f"🔄 Check sub callback from user {user_id}")
     
     if await is_subscribed(user_id):
         await query.message.edit_caption(
@@ -241,38 +201,11 @@ async def check_sub_callback(client: Client, query: CallbackQuery):
                 InlineKeyboardButton("🔔 Updates", url="https://t.me/RHmovieHDOFFICIAL"),
                 InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
             ], [
-                InlineKeyboardButton("📊 Stats", callback_data="stats"),
                 InlineKeyboardButton("ℹ️ About", callback_data="about")
             ]])
         )
     else:
         await query.answer("❌ Please join the channel first!", show_alert=True)
-
-@app.on_callback_query(filters.regex("stats"))
-async def stats_callback(client: Client, query: CallbackQuery):
-    if query.from_user.id not in ADMINS:
-        await query.answer("❌ Admin access required!", show_alert=True)
-        return
-    
-    uptime = get_uptime()
-    total_users = users_collection.count_documents({}) if users_collection else "N/A"
-    total_files = files_collection.count_documents({}) if files_collection else "N/A"
-    
-    stats_text = f"""
-<b>📊 Bot Statistics</b>
-
-⏰ Uptime: <code>{uptime}</code>
-👥 Total Users: <code>{total_users}</code>
-📁 Total Files: <code>{total_files}</code>
-🛠️ Admins: <code>{len(ADMINS)}</code>
-📢 Force Sub: <code>{FORCE_SUB_CHANNEL_1}</code>
-"""
-    await query.message.edit_caption(
-        caption=stats_text,
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🔙 Back", callback_data="back_to_start")
-        ]])
-    )
 
 @app.on_callback_query(filters.regex("about"))
 async def about_callback(client: Client, query: CallbackQuery):
@@ -283,7 +216,7 @@ A powerful Telegram bot to store and share files through channels.
 
 <b>Features:</b>
 • File storage in channels
-• Force subscribe system
+• Force subscribe system  
 • User management
 • Broadcast messages
 
@@ -304,7 +237,6 @@ async def back_to_start(client: Client, query: CallbackQuery):
             InlineKeyboardButton("🔔 Updates", url="https://t.me/RHmovieHDOFFICIAL"),
             InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
         ], [
-            InlineKeyboardButton("📊 Stats", callback_data="stats"),
             InlineKeyboardButton("ℹ️ About", callback_data="about")
         ]])
     )
@@ -321,6 +253,7 @@ async def stats_command(client: Client, message: Message):
 ⏰ Uptime: {uptime}
 👥 Users: {total_users}
 🛠️ Admins: {len(ADMINS)}
+📢 Force Sub: {FORCE_SUB_CHANNEL_1}
 """
     await message.reply_text(stats_text)
 
@@ -373,7 +306,7 @@ async def store_file(client: Client, message: Message):
     try:
         # Forward to channel
         forwarded = await message.forward(CHANNEL_ID)
-        logger.info(f"✅ File forwarded to channel {CHANNEL_ID}, message ID: {forwarded.id}")
+        logger.info(f"✅ File forwarded to channel {CHANNEL_ID}")
         
         # Save to database
         if files_collection:
@@ -389,8 +322,12 @@ async def store_file(client: Client, message: Message):
         logger.error(f"❌ Error storing file: {e}")
         await message.reply_text(f"❌ Error: {e}")
 
-# Health check server
+# Simple HTTP server for health checks (RUNS IN SEPARATE TASK)
 async def start_web_server():
+    """
+    Start a simple HTTP server for health checks
+    This runs in a separate task to avoid blocking
+    """
     try:
         from aiohttp import web
         
@@ -407,27 +344,27 @@ async def start_web_server():
         await site.start()
         logger.info(f"🌐 Health server started on port {PORT}")
         return runner
+    except ImportError:
+        logger.warning("⚠️ aiohttp not available, health checks disabled")
+        return None
     except Exception as e:
-        logger.warning(f"⚠️ Web server not started: {e}")
+        logger.error(f"❌ Web server error: {e}")
         return None
 
-# Main function
+# Main function - FIXED FOR KOYEB
 async def main():
     logger.info("🚀 Starting File Store Bot...")
     
-    # Validate config
-    logger.info("🔍 Configuration Summary:")
-    logger.info(f"   Bot Token: {'✓' if BOT_TOKEN else '✗'}")
-    logger.info(f"   API ID: {'✓' if API_ID else '✗'}")
-    logger.info(f"   API Hash: {'✓' if API_HASH else '✗'}")
-    logger.info(f"   Main Channel: {CHANNEL_ID}")
-    logger.info(f"   Force Sub: {FORCE_SUB_CHANNEL_1}")
-    logger.info(f"   Owner: {OWNER_ID}")
-    
-    # Start web server
-    web_runner = await start_web_server()
+    # Start web server in background task
+    web_task = None
+    try:
+        web_runner = await start_web_server()
+    except Exception as e:
+        logger.warning(f"⚠️ Could not start web server: {e}")
+        web_runner = None
     
     try:
+        # Start the bot
         await app.start()
         bot = await app.get_me()
         logger.info(f"✅ Bot @{bot.username} started successfully!")
@@ -442,17 +379,34 @@ async def main():
 ║ 🔔 Force: {FORCE_SUB_CHANNEL_1}
 ║ 🌐 Port: {PORT}
 ╚══════════════════════╝
+
+💡 Bot is now listening for messages...
+Try sending /start to @{bot.username}
         """)
         
-        await idle()
-        
+        # Keep the bot running - FIXED for Koyeb
+        while True:
+            await asyncio.sleep(3600)  # Sleep for 1 hour
+            logger.info("🔄 Bot is still running...")
+            
     except Exception as e:
-        logger.error(f"❌ Bot startup failed: {e}")
+        logger.error(f"❌ Bot error: {e}")
     finally:
+        # Cleanup
+        logger.info("🛑 Shutting down bot...")
+        try:
+            await app.stop()
+        except:
+            pass
         if web_runner:
             await web_runner.cleanup()
-        await app.stop()
         logger.info("👋 Bot stopped")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Run the bot
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("⏹️ Bot stopped by user")
+    except Exception as e:
+        logger.error(f"💥 Bot crashed: {e}")
