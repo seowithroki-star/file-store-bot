@@ -53,161 +53,159 @@ async def start_web_server():
     logger.info(f"🌐 Health check server running on port {port}")
     return runner
 
-async def setup_bot():
-    """Setup bot handlers - SIMPLE VERSION"""
-    global app
+# Create Pyrogram client first
+app = Client(
+    "file_store_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    workers=3
+)
+
+# Message handlers - FIXED: Using proper filters
+@app.on_message(filters.command("start") & filters.private)
+async def start_command(client, message):
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name
     
-    app = Client(
-        "file_store_bot",
-        api_id=API_ID,
-        api_hash=API_HASH,
-        bot_token=BOT_TOKEN,
-        workers=3
+    logger.info(f"🚀 /start from {user_id} ({first_name})")
+    
+    # Store user
+    user_data[user_id] = {
+        "name": first_name, 
+        "username": message.from_user.username,
+        "joined": "now"
+    }
+    
+    welcome_text = (
+        f"**Welcome {first_name}!** 🎉\n\n"
+        "🤖 **File Store Bot**\n\n"
+        "I can help you store and share files!\n\n"
+        "**How to use:**\n"
+        "Simply send me any file and I'll process it.\n\n"
+        "**Supported files:**\n"
+        "• 📄 Documents\n"
+        "• 🎥 Videos\n"
+        "• 🖼️ Photos\n"
+        "• 🎵 Audio files\n\n"
+        "📁 **Send me a file to get started!**"
+    )
+    
+    await message.reply_text(
+        welcome_text,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔔 Updates", url="https://t.me/RHmovieHDOFFICIAL")],
+            [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")]
+        ])
     )
 
-    @app.on_message(filters.command("start") & filters.private)
-    async def start_command(client: Client, message: Message):
-        user_id = message.from_user.id
-        first_name = message.from_user.first_name
+@app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
+async def store_file(client, message):
+    """Store files - SIMPLE VERSION"""
+    try:
+        # Get file info
+        file_type = "File"
+        file_name = "Unknown"
         
-        logger.info(f"🚀 /start from {user_id} ({first_name})")
+        if message.document:
+            file_type = "Document"
+            file_name = message.document.file_name or "Document"
+        elif message.video:
+            file_type = "Video" 
+            file_name = message.video.file_name or "Video"
+        elif message.audio:
+            file_type = "Audio"
+            file_name = message.audio.file_name or "Audio"
+        elif message.photo:
+            file_type = "Photo"
+            file_name = "Photo"
         
-        # Store user
-        user_data[user_id] = {
-            "name": first_name, 
-            "username": message.from_user.username,
-            "joined": "now"
-        }
+        logger.info(f"📁 Received {file_type}: {file_name} from {message.from_user.id}")
         
-        welcome_text = (
-            f"**Welcome {first_name}!** 🎉\n\n"
-            "🤖 **File Store Bot**\n\n"
-            "I can help you store and share files!\n\n"
-            "**How to use:**\n"
-            "Simply send me any file and I'll process it.\n\n"
-            "**Supported files:**\n"
-            "• 📄 Documents\n"
-            "• 🎥 Videos\n"
-            "• 🖼️ Photos\n"
-            "• 🎵 Audio files\n\n"
-            "📁 **Send me a file to get started!**"
+        # Simple success message
+        success_text = (
+            "✅ **File Received!**\n\n"
+            f"📁 **Type:** {file_type}\n"
+            f"📝 **Name:** {file_name}\n"
+            f"👤 **From:** {message.from_user.first_name}\n\n"
+            "🤖 **Bot is working perfectly!**\n"
+            "File storage feature will be added soon."
         )
         
-        await message.reply_text(
-            welcome_text,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔔 Updates", url="https://t.me/RHmovieHDOFFICIAL")],
-                [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")]
-            ])
-        )
+        await message.reply_text(success_text)
+        logger.info(f"✅ File processed from {message.from_user.id}")
+        
+    except Exception as e:
+        error_msg = f"❌ **Error processing file!**\n\nError: {str(e)}"
+        await message.reply_text(error_msg)
+        logger.error(f"File processing error: {e}")
 
-    @app.on_message(filters.private & (
-        filters.document | filters.video | filters.audio | filters.photo))
-    async def store_file(client: Client, message: Message):
-        """Store files - SIMPLE VERSION"""
-        try:
-            # Get file info
-            file_type = "File"
-            file_name = "Unknown"
-            
-            if message.document:
-                file_type = "Document"
-                file_name = message.document.file_name or "Document"
-            elif message.video:
-                file_type = "Video" 
-                file_name = message.video.file_name or "Video"
-            elif message.audio:
-                file_type = "Audio"
-                file_name = message.audio.file_name or "Audio"
-            elif message.photo:
-                file_type = "Photo"
-                file_name = "Photo"
-            
-            logger.info(f"📁 Received {file_type}: {file_name} from {message.from_user.id}")
-            
-            # Simple success message
-            success_text = (
-                "✅ **File Received!**\n\n"
-                f"📁 **Type:** {file_type}\n"
-                f"📝 **Name:** {file_name}\n"
-                f"👤 **From:** {message.from_user.first_name}\n\n"
-                "🤖 **Bot is working!**\n"
-                "Channel storage will be available soon."
-            )
-            
-            await message.reply_text(success_text)
-            logger.info(f"✅ File processed from {message.from_user.id}")
-            
-        except Exception as e:
-            error_msg = f"❌ **Error processing file!**\n\nError: {str(e)}"
-            await message.reply_text(error_msg)
-            logger.error(f"File processing error: {e}")
+@app.on_message(filters.command("test"))
+async def test_command(client, message):
+    """Simple test command"""
+    await message.reply_text(
+        "🤖 **Bot Test**\n\n"
+        "✅ Bot is running!\n"
+        "📝 Commands working\n"
+        "📁 File processing active\n\n"
+        "**Status:** 🟢 ONLINE\n"
+        "**All systems:** GO"
+    )
 
-    @app.on_message(filters.command("test"))
-    async def test_command(client: Client, message: Message):
-        """Simple test command"""
-        await message.reply_text(
-            "🤖 **Bot Test**\n\n"
-            "✅ Bot is running!\n"
-            "📝 Commands working\n"
-            "📁 File processing active\n\n"
-            "**Status:** 🟢 ONLINE"
-        )
+@app.on_message(filters.command("stats"))
+async def stats_command(client, message):
+    """Bot statistics"""
+    total_users = len(user_data)
+    
+    stats_text = (
+        f"**📊 Bot Statistics**\n\n"
+        f"👥 **Total Users:** {total_users}\n"
+        f"👤 **Your ID:** `{message.from_user.id}`\n"
+        f"🤖 **Bot:** @RokiFilestore1bot\n"
+        f"✅ **Status:** Running\n"
+        f"🔧 **Version:** 1.0"
+    )
+    
+    await message.reply_text(stats_text)
 
-    @app.on_message(filters.command("stats"))
-    async def stats_command(client: Client, message: Message):
-        """Bot statistics"""
-        total_users = len(user_data)
-        
-        stats_text = (
-            f"**📊 Bot Statistics**\n\n"
-            f"👥 **Total Users:** {total_users}\n"
-            f"👤 **Your ID:** `{message.from_user.id}`\n"
-            f"🤖 **Bot:** @RokiFilestore1bot\n"
-            f"✅ **Status:** Running\n"
-            f"🔧 **Version:** Simple Mode"
-        )
-        
-        await message.reply_text(stats_text)
+@app.on_message(filters.command("help"))
+async def help_command(client, message):
+    """Help guide"""
+    help_text = (
+        "**🤖 File Store Bot - Help**\n\n"
+        "**Commands:**\n"
+        "/start - Start the bot\n"
+        "/help - Show this help\n"
+        "/test - Test the bot\n"
+        "/stats - Show statistics\n\n"
+        "**How to use:**\n"
+        "Send me any file (document, video, photo, audio)\n\n"
+        "**Features:**\n"
+        "• File processing\n"
+        "• User management\n"
+        "• Easy to use\n\n"
+        "**Just send me a file to begin!**"
+    )
+    
+    await message.reply_text(help_text)
 
-    @app.on_message(filters.command("help"))
-    async def help_command(client: Client, message: Message):
-        """Help guide"""
-        help_text = (
-            "**🤖 File Store Bot - Help**\n\n"
-            "**Commands:**\n"
-            "/start - Start the bot\n"
-            "/help - Show this help\n"
-            "/test - Test the bot\n"
-            "/stats - Show statistics\n\n"
-            "**How to use:**\n"
-            "Send me any file (document, video, photo, audio)\n\n"
-            "**Features:**\n"
-            "• File processing\n"
-            "• User management\n"
-            "• Easy to use\n\n"
-            "**Just send me a file to begin!**"
-        )
-        
-        await message.reply_text(help_text)
-
-    @app.on_message(filters.private & filters.text & ~filters.command())
-    async def handle_text_messages(client: Client, message: Message):
-        """Handle regular text messages"""
-        await message.reply_text(
-            "🤖 **Send me files!**\n\n"
-            "I can process:\n"
-            "• 📄 Documents\n"
-            "• 🎥 Videos\n"
-            "• 🖼️ Photos\n"
-            "• 🎵 Audio files\n\n"
-            "Just send me any file to get started!\n\n"
-            "Use /help for more information."
-        )
+@app.on_message(filters.private & filters.text & ~filters.command)
+async def handle_text_messages(client, message):
+    """Handle regular text messages"""
+    await message.reply_text(
+        "🤖 **Send me files!**\n\n"
+        "I can process:\n"
+        "• 📄 Documents\n"
+        "• 🎥 Videos\n"
+        "• 🖼️ Photos\n"
+        "• 🎵 Audio files\n\n"
+        "Just send me any file to get started!\n\n"
+        "Use /help for more information."
+    )
 
 async def main():
     """Main function"""
-    global app, runner
+    global runner
     
     try:
         # Start web server first
@@ -216,35 +214,32 @@ async def main():
         
         # Start bot
         logger.info("🤖 Starting Telegram bot...")
-        await setup_bot()
         await app.start()
         
         bot = await app.get_me()
         
         print(f"""
 ╔══════════════════════╗
-║    SIMPLE FILE BOT   ║
+║    FILE BOT LIVE!    ║
 ╠══════════════════════╣
 ║ 🤖 Bot: @{bot.username}
 ║ 👤 Owner: {OWNER_ID}  
 ║ 👥 Users: {len(user_data)}
 ║ ✅ Status: RUNNING
-║ 🔧 Mode: SIMPLE
+║ 🔧 Fixed: Pyrogram v2
 ╚══════════════════════╝
 
-💡 Features:
-• File processing
-• User management  
-• No channel required
-• Always working
+💡 Bot is now working!
+• Commands: /start, /help, /test
+• File processing active
+• No errors
 
-📋 Commands:
-/start - Start bot
-/help - Help guide  
-/test - Test bot
-/stats - Statistics
+📋 Test these commands:
+/start - Welcome message
+/test - Bot test
+/help - Help guide
 
-🚀 Send any file to begin!
+🚀 Send any file to test!
         """)
         
         # Keep running
