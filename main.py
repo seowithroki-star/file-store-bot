@@ -8,86 +8,10 @@ import time
 from datetime import datetime
 import sys
 
-# Configuration
-def get_env_var(key, default=""):
-    value = os.environ.get(key, default)
-    return value
+# Configuration - Keep your existing config code...
+# [আপনার existing configuration code এখানে রাখুন]
 
-def get_int_env(key, default=0):
-    value = os.environ.get(key, str(default))
-    try:
-        return int(value) if value else default
-    except ValueError:
-        raise ValueError(f"{key} must be an integer!")
-
-def get_required_env(key):
-    """Get required environment variable"""
-    value = os.environ.get(key)
-    if not value:
-        raise ValueError(f"Environment variable {key} is required!")
-    return value
-
-def get_required_int_env(key):
-    """Get required integer environment variable"""
-    value = os.environ.get(key)
-    if not value:
-        raise ValueError(f"Environment variable {key} is required!")
-    try:
-        return int(value)
-    except ValueError:
-        raise ValueError(f"{key} must be an integer!")
-
-# Required variables
-try:
-    BOT_TOKEN = get_required_env("BOT_TOKEN")
-    API_ID = get_required_int_env("API_ID")
-    API_HASH = get_required_env("API_HASH")
-except ValueError as e:
-    print(f"❌ {e}")
-    sys.exit(1)
-
-# Koyeb uses PORT environment variable
-PORT = int(os.environ.get("PORT", 8080))
-
-# Optional variables
-OWNER_ID = get_int_env("OWNER_ID", 7945670631)
-DB_URL = get_env_var("DB_URL", "")
-DB_NAME = get_env_var("DB_NAME", "file_store_bot")
-
-# YOUR CHANNEL IDs
-CHANNEL_ID = -1003279353938  # Main channel
-FORCE_SUB_CHANNEL_1 = -1003483616299  # Force sub channel
-
-# Other settings
-START_PIC = get_env_var("START_PIC", "https://files.catbox.moe/ufzpkn.jpg")
-F_PIC = get_env_var("FORCE_PIC", "https://files.catbox.moe/ufzpkn.jpg")
-
-# Admins setup
-try:
-    ADMINS = [OWNER_ID]
-    admins_str = os.environ.get("ADMINS", "")
-    if admins_str:
-        additional_admins = [int(x.strip()) for x in admins_str.split() if x.strip()]
-        ADMINS.extend(additional_admins)
-    ADMINS = list(dict.fromkeys(ADMINS))
-except ValueError:
-    raise Exception("Admins list contains invalid integers!")
-
-# Bot messages
-START_MSG = get_env_var("START_MESSAGE", "<b>Hi {first}! 🤖 I am an Advanced File Store Bot</b>")
-FORCE_MSG = get_env_var("FORCE_SUB_MESSAGE", "📢 Please join our channels first to use this bot!")
-
-# Logging setup
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s - %(levelname)s] - %(name)s - %(message)s",
-    datefmt='%d-%b-%y %H:%M:%S',
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-
-logger = logging.getLogger(__name__)
-
-# Pyrogram Client
+# Pyrogram Client - FIXED
 app = Client(
     "file_store_bot",
     api_id=API_ID,
@@ -139,9 +63,9 @@ async def get_channel_username(channel_id: int):
         logger.error(f"Error getting channel username: {e}")
         return "unknown"
 
-# Start command handler
+# FIXED: Remove type annotations from handler parameters
 @app.on_message(filters.command("start") & filters.private)
-async def start_command(client: Client, message: Message):
+async def start_command(client, message):
     user_id = message.from_user.id
     first_name = message.from_user.first_name
     
@@ -176,9 +100,9 @@ async def start_command(client: Client, message: Message):
         ]])
     )
 
-# Callback query handlers
+# FIXED: Callback handlers
 @app.on_callback_query(filters.regex("check_sub"))
-async def check_sub_callback(client: Client, query: CallbackQuery):
+async def check_sub_callback(client, query):
     user_id = query.from_user.id
     first_name = query.from_user.first_name
     
@@ -196,7 +120,7 @@ async def check_sub_callback(client: Client, query: CallbackQuery):
         await query.answer("❌ Please join our channel first!", show_alert=True)
 
 @app.on_callback_query(filters.regex("about"))
-async def about_callback(client: Client, query: CallbackQuery):
+async def about_callback(client, query):
     about_text = """
 <b>🤖 About This Bot</b>
 
@@ -217,7 +141,7 @@ This bot can store files and forward them to users."""
     )
 
 @app.on_callback_query(filters.regex("back_to_start"))
-async def back_to_start(client: Client, query: CallbackQuery):
+async def back_to_start(client, query):
     first_name = query.from_user.first_name
     await query.message.edit_caption(
         caption=START_MSG.format(first=first_name),
@@ -229,9 +153,9 @@ async def back_to_start(client: Client, query: CallbackQuery):
         ]])
     )
 
-# Stats command for owner
+# FIXED: Stats command
 @app.on_message(filters.command("stats") & filters.private & filters.user(ADMINS))
-async def stats_command(client: Client, message: Message):
+async def stats_command(client, message):
     uptime = get_uptime()
     
     stats_text = f"""
@@ -246,9 +170,9 @@ async def stats_command(client: Client, message: Message):
     
     await message.reply_text(stats_text)
 
-# File store functionality
+# FIXED: File store functionality
 @app.on_message(filters.private & filters.user(ADMINS) & (filters.document | filters.video | filters.audio | filters.photo))
-async def store_file(client: Client, message: Message):
+async def store_file(client, message):
     """Store files sent by admins"""
     if not CHANNEL_ID:
         await message.reply_text("❌ CHANNEL_ID not configured!")
@@ -273,72 +197,8 @@ async def store_file(client: Client, message: Message):
         await message.reply_text(f"❌ Error storing file: {e}")
         logger.error(f"File storage error: {e}")
 
-# Simple HTTP server for health checks
-async def start_web_server():
-    try:
-        from aiohttp import web
-        
-        async def health_check(request):
-            return web.Response(text="🤖 Bot is running!")
-        
-        app_web = web.Application()
-        app_web.router.add_get('/', health_check)
-        app_web.router.add_get('/health', health_check)
-        
-        runner = web.AppRunner(app_web)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', PORT)
-        await site.start()
-        logger.info(f"🌐 Health check server running on port {PORT}")
-        return runner
-    except ImportError:
-        logger.warning("aiohttp not installed, health checks disabled")
-        return None
-    except Exception as e:
-        logger.error(f"Failed to start web server: {e}")
-        return None
-
-# Start the bot
-async def main():
-    logger.info("🚀 Starting File Store Bot...")
-    
-    logger.info(f"📢 Main Channel: {CHANNEL_ID}")
-    logger.info(f"🔔 Force Sub: {FORCE_SUB_CHANNEL_1}")
-    
-    # Start web server for health checks
-    web_runner = await start_web_server()
-    
-    try:
-        await app.start()
-        bot_info = await app.get_me()
-        logger.info(f"🤖 Bot Started Successfully! @{bot_info.username}")
-        
-        print(f"""
-╔══════════════════════╗
-║   FILE STORE BOT     ║
-║      Started!        ║
-╠══════════════════════╣
-║ 🤖 Bot: @{bot_info.username}
-║ 👤 Owner: {OWNER_ID}
-║ 👥 Admins: {len(ADMINS)}
-║ 📢 Main: {CHANNEL_ID}
-║ 🔔 Force Sub: {FORCE_SUB_CHANNEL_1}
-║ 🌐 Port: {PORT}
-║ 🚀 Host: Koyeb
-╚══════════════════════╝
-        """)
-        
-        # Keep the bot running
-        await idle()
-        
-    except Exception as e:
-        logger.error(f"❌ Bot failed to start: {e}")
-    finally:
-        # Cleanup
-        if web_runner:
-            await web_runner.cleanup()
-        await app.stop()
-        logger.info("👋 Bot stopped")
+# Keep your existing web server and main function...
+# [আপনার existing web server and main function code এখানে রাখুন]
 
 if __name__ == "__main__":
     try:
