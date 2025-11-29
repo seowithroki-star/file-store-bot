@@ -37,22 +37,9 @@ OWNER_ID = get_int_env("OWNER_ID", 7945670631)
 DB_URL = get_env_var("DB_URL", "")
 DB_NAME = get_env_var("DB_NAME", "file_store_bot")
 
-# Channels
-CHANNEL_ID = get_int_env("CHANNEL_ID", -1003094784222)
-
-def get_channel_id(env_var, default=0):
-    value = os.environ.get(env_var)
-    if not value or value == "0":
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        return None
-
-FORCE_SUB_CHANNEL_1 = get_channel_id("FORCE_SUB_CHANNEL_1", -1003056865925)
-FORCE_SUB_CHANNEL_2 = get_channel_id("FORCE_SUB_CHANNEL_2")
-FORCE_SUB_CHANNEL_3 = get_channel_id("FORCE_SUB_CHANNEL_3")
-FORCE_SUB_CHANNEL_4 = get_channel_id("FORCE_SUB_CHANNEL_4")
+# YOUR CHANNEL IDs
+CHANNEL_ID = -1003279353938  # Main channel
+FORCE_SUB_CHANNEL_1 = -1003483616299  # Force sub channel
 
 # Other settings
 START_PIC = get_env_var("START_PIC", "https://files.catbox.moe/ufzpkn.jpg")
@@ -125,19 +112,13 @@ start_time = time.time()
 
 async def is_subscribed(user_id: int) -> bool:
     """Check if user is subscribed to required channels"""
-    if not any([FORCE_SUB_CHANNEL_1, FORCE_SUB_CHANNEL_2, FORCE_SUB_CHANNEL_3, FORCE_SUB_CHANNEL_4]):
+    if not FORCE_SUB_CHANNEL_1:
         return True
     
     try:
-        for channel_id in [FORCE_SUB_CHANNEL_1, FORCE_SUB_CHANNEL_2, FORCE_SUB_CHANNEL_3, FORCE_SUB_CHANNEL_4]:
-            if channel_id:
-                try:
-                    member = await app.get_chat_member(channel_id, user_id)
-                    if member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
-                        return False
-                except Exception as e:
-                    logger.error(f"Error checking channel {channel_id}: {e}")
-                    return False
+        member = await app.get_chat_member(FORCE_SUB_CHANNEL_1, user_id)
+        if member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
+            return False
         return True
     except Exception as e:
         logger.error(f"Error checking subscription: {e}")
@@ -174,6 +155,8 @@ async def start_command(client: Client, message: Message):
     user_id = message.from_user.id
     first_name = message.from_user.first_name
     
+    logger.info(f"🚀 /start from {user_id} ({first_name})")
+    
     # Save user to database
     if users_collection:
         try:
@@ -195,10 +178,7 @@ async def start_command(client: Client, message: Message):
         
         if FORCE_SUB_CHANNEL_1:
             channel_username = await get_channel_username(FORCE_SUB_CHANNEL_1)
-            buttons.append([InlineKeyboardButton("📢 Channel 1", url=f"https://t.me/{channel_username}")])
-        if FORCE_SUB_CHANNEL_2:
-            channel_username = await get_channel_username(FORCE_SUB_CHANNEL_2)
-            buttons.append([InlineKeyboardButton("📢 Channel 2", url=f"https://t.me/{channel_username}")])
+            buttons.append([InlineKeyboardButton("📢 Join Our Channel", url=f"https://t.me/{channel_username}")])
         
         buttons.append([InlineKeyboardButton("🔄 Try Again", callback_data="check_sub")])
         
@@ -217,7 +197,8 @@ async def start_command(client: Client, message: Message):
             InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
             InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
         ], [
-            InlineKeyboardButton("ℹ️ About", callback_data="about")
+            InlineKeyboardButton("ℹ️ About", callback_data="about"),
+            InlineKeyboardButton("📊 Stats", callback_data="stats")
         ]])
     )
 
@@ -234,11 +215,12 @@ async def check_sub_callback(client: Client, query: CallbackQuery):
                 InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
                 InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
             ], [
-                InlineKeyboardButton("ℹ️ About", callback_data="about")
+                InlineKeyboardButton("ℹ️ About", callback_data="about"),
+                InlineKeyboardButton("📊 Stats", callback_data="stats")
             ]])
         )
     else:
-        await query.answer("❌ Please join all channels first!", show_alert=True)
+        await query.answer("❌ Please join our channel first!", show_alert=True)
 
 @app.on_callback_query(filters.regex("about"))
 async def about_callback(client: Client, query: CallbackQuery):
@@ -253,10 +235,41 @@ async def about_callback(client: Client, query: CallbackQuery):
 <b>👨‍💻 Developer:</b> @Rakibul51624
 <b>📢 Channel:</b> @RHmovieHDOFFICIAL
 
+<b>📁 Main Channel:</b> -1003279353938
+<b>🔔 Force Sub:</b> -1003483616299
+
 This bot can store files and forward them to users."""
     
     await query.message.edit_caption(
         caption=about_text,
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔙 Back", callback_data="back_to_start")
+        ]])
+    )
+
+@app.on_callback_query(filters.regex("stats"))
+async def stats_callback(client: Client, query: CallbackQuery):
+    if query.from_user.id not in ADMINS:
+        await query.answer("❌ Admin access required!", show_alert=True)
+        return
+    
+    uptime = get_uptime()
+    total_users = users_collection.count_documents({}) if users_collection else "N/A"
+    total_files = files_collection.count_documents({}) if files_collection else "N/A"
+    
+    stats_text = f"""
+<b>📊 Bot Statistics</b>
+
+<b>⏰ Uptime:</b> {uptime}
+<b>👥 Total Users:</b> {total_users}
+<b>📁 Total Files:</b> {total_files}
+<b>🛠️ Admin Count:</b> {len(ADMINS)}
+<b>📢 Main Channel:</b> {CHANNEL_ID}
+<b>🔔 Force Sub:</b> {FORCE_SUB_CHANNEL_1}
+"""
+    
+    await query.message.edit_caption(
+        caption=stats_text,
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🔙 Back", callback_data="back_to_start")
         ]])
@@ -271,7 +284,8 @@ async def back_to_start(client: Client, query: CallbackQuery):
             InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
             InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
         ], [
-            InlineKeyboardButton("ℹ️ About", callback_data="about")
+            InlineKeyboardButton("ℹ️ About", callback_data="about"),
+            InlineKeyboardButton("📊 Stats", callback_data="stats")
         ]])
     )
 
@@ -289,20 +303,60 @@ async def stats_command(client: Client, message: Message):
 <b>👥 Total Users:</b> {total_users}
 <b>📁 Total Files:</b> {total_files}
 <b>🛠️ Admin Count:</b> {len(ADMINS)}
+<b>📢 Main Channel:</b> {CHANNEL_ID}
+<b>🔔 Force Sub:</b> {FORCE_SUB_CHANNEL_1}
 <b>🌐 Port:</b> {PORT}
 """
     
     await message.reply_text(stats_text)
 
+# File store functionality
+@app.on_message(filters.private & filters.user(ADMINS) & (filters.document | filters.video | filters.audio | filters.photo))
+async def store_file(client: Client, message: Message):
+    """Store files sent by admins"""
+    if not CHANNEL_ID:
+        await message.reply_text("❌ CHANNEL_ID not configured!")
+        return
+    
+    try:
+        # Forward file to channel
+        forwarded_msg = await message.forward(CHANNEL_ID)
+        
+        # Save to database
+        if files_collection:
+            files_collection.insert_one({
+                "file_id": forwarded_msg.id,
+                "message_id": forwarded_msg.id,
+                "chat_id": CHANNEL_ID,
+                "file_type": message.media.value if message.media else "document",
+                "date": datetime.now(),
+                "admin_id": message.from_user.id
+            })
+        
+        file_link = f"https://t.me/c/{str(CHANNEL_ID)[4:]}/{forwarded_msg.id}"
+        
+        await message.reply_text(
+            f"✅ File stored successfully!\n\n"
+            f"📁 File ID: `{forwarded_msg.id}`\n"
+            f"🔗 Direct Link: {file_link}",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📂 View in Channel", url=file_link)
+            ]])
+        )
+        
+    except Exception as e:
+        await message.reply_text(f"❌ Error storing file: {e}")
+        logger.error(f"File storage error: {e}")
+
 # Simple HTTP server for health checks
 async def start_web_server():
     try:
         from aiohttp import web
-        app_web = web.Application()
         
         async def health_check(request):
             return web.Response(text="🤖 Bot is running!")
         
+        app_web = web.Application()
         app_web.router.add_get('/', health_check)
         app_web.router.add_get('/health', health_check)
         
@@ -336,6 +390,8 @@ async def main():
             sys.exit(1)
     
     logger.info("✅ Configuration validated successfully!")
+    logger.info(f"📢 Main Channel: {CHANNEL_ID}")
+    logger.info(f"🔔 Force Sub: {FORCE_SUB_CHANNEL_1}")
     
     # Start web server for health checks
     web_runner = await start_web_server()
@@ -353,6 +409,8 @@ async def main():
 ║ 🤖 Bot: @{bot_info.username}
 ║ 👤 Owner: {OWNER_ID}
 ║ 👥 Admins: {len(ADMINS)}
+║ 📢 Main: {CHANNEL_ID}
+║ 🔔 Force Sub: {FORCE_SUB_CHANNEL_1}
 ║ 🌐 Port: {PORT}
 ║ 🚀 Host: Koyeb
 ╚══════════════════════╝
