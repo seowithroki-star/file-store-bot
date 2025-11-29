@@ -78,6 +78,23 @@ app = Client(
     workers=3
 )
 
+# ==================== EMERGENCY DEBUGGING ====================
+@app.on_message(filters.command("test") & filters.private)
+async def test_command(client, message):
+    """Emergency test command"""
+    logger.info(f"🎯 TEST COMMAND RECEIVED FROM: {message.from_user.id}")
+    await message.reply_text("🚨 BOT IS WORKING! Test successful!")
+
+@app.on_message(filters.text & filters.private)
+async def echo_all_messages(client, message):
+    """Echo all text messages for testing"""
+    user_id = message.from_user.id
+    text = message.text
+    logger.info(f"📩 Message from {user_id}: {text}")
+    
+    if text not in ['/start', '/test', '/stats']:
+        await message.reply_text(f"Echo: {text}")
+
 # ==================== REST OF YOUR CODE ====================
 # Bot start time
 start_time = time.time()
@@ -158,7 +175,102 @@ async def start_command(client, message):
         ]])
     )
 
-# ... REST OF YOUR HANDLERS (same as before) ...
+# Callback query handlers
+@app.on_callback_query(filters.regex("check_sub"))
+async def check_sub_callback(client, query):
+    user_id = query.from_user.id
+    first_name = query.from_user.first_name
+    
+    if await is_subscribed(user_id):
+        await query.message.edit_caption(
+            caption=START_MSG.format(first=first_name),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
+                InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
+            ], [
+                InlineKeyboardButton("ℹ️ About", callback_data="about")
+            ]])
+        )
+    else:
+        await query.answer("❌ Please join our channel first!", show_alert=True)
+
+@app.on_callback_query(filters.regex("about"))
+async def about_callback(client, query):
+    about_text = """
+<b>🤖 About This Bot</b>
+
+<b>📝 Language:</b> Python 3
+<b>📚 Framework:</b> Pyrogram
+<b>🚀 Host:</b> Koyeb
+
+<b>👨‍💻 Developer:</b> @Rakibul51624
+<b>📢 Channel:</b> @RHmovieHDOFFICIAL
+
+This bot can store files and forward them to users."""
+    
+    await query.message.edit_caption(
+        caption=about_text,
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔙 Back", callback_data="back_to_start")
+        ]])
+    )
+
+@app.on_callback_query(filters.regex("back_to_start"))
+async def back_to_start(client, query):
+    first_name = query.from_user.first_name
+    await query.message.edit_caption(
+        caption=START_MSG.format(first=first_name),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
+            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
+        ], [
+            InlineKeyboardButton("ℹ️ About", callback_data="about")
+        ]])
+    )
+
+# Stats command for owner
+@app.on_message(filters.command("stats") & filters.private & filters.user(ADMINS))
+async def stats_command(client, message):
+    uptime = get_uptime()
+    
+    stats_text = f"""
+<b>🤖 Bot Statistics</b>
+
+<b>⏰ Uptime:</b> {uptime}
+<b>🛠️ Admin Count:</b> {len(ADMINS)}
+<b>📢 Main Channel:</b> {CHANNEL_ID}
+<b>🔔 Force Sub:</b> {FORCE_SUB_CHANNEL_1}
+<b>🌐 Port:</b> {PORT}
+"""
+    
+    await message.reply_text(stats_text)
+
+# File store functionality
+@app.on_message(filters.private & filters.user(ADMINS) & (filters.document | filters.video | filters.audio | filters.photo))
+async def store_file(client, message):
+    """Store files sent by admins"""
+    if not CHANNEL_ID:
+        await message.reply_text("❌ CHANNEL_ID not configured!")
+        return
+    
+    try:
+        # Forward file to channel
+        forwarded_msg = await message.forward(CHANNEL_ID)
+        
+        file_link = f"https://t.me/c/{str(CHANNEL_ID)[4:]}/{forwarded_msg.id}"
+        
+        await message.reply_text(
+            f"✅ File stored successfully!\n\n"
+            f"📁 File ID: `{forwarded_msg.id}`\n"
+            f"🔗 Direct Link: {file_link}",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📂 View in Channel", url=file_link)
+            ]])
+        )
+        
+    except Exception as e:
+        await message.reply_text(f"❌ Error storing file: {e}")
+        logger.error(f"File storage error: {e}")
 
 # Simple HTTP server for health checks
 async def start_web_server():
@@ -188,6 +300,11 @@ async def start_web_server():
 # Start the bot
 async def main():
     logger.info("🚀 Starting File Store Bot...")
+    
+    # Test print to verify environment variables
+    logger.info(f"🔑 API_ID: {API_ID}")
+    logger.info(f"🔑 BOT_TOKEN first 10 chars: {BOT_TOKEN[:10]}...")
+    
     logger.info(f"📢 Main Channel: {CHANNEL_ID}")
     logger.info(f"🔔 Force Sub: {FORCE_SUB_CHANNEL_1}")
     
@@ -198,6 +315,10 @@ async def main():
         await app.start()
         bot_info = await app.get_me()
         logger.info(f"🤖 Bot Started Successfully! @{bot_info.username}")
+        
+        # Force print to verify bot is running
+        print("🎉 BOT IS ACTUALLY RUNNING NOW!")
+        print(f"🔗 Bot: https://t.me/{bot_info.username}")
         
         print(f"""
 ╔══════════════════════╗
@@ -219,6 +340,7 @@ async def main():
         
     except Exception as e:
         logger.error(f"❌ Bot failed to start: {e}")
+        print(f"💥 CRITICAL ERROR: {e}")
     finally:
         # Cleanup
         if web_runner:
@@ -227,9 +349,10 @@ async def main():
         logger.info("👋 Bot stopped")
 
 if __name__ == "__main__":
+    print("🟢 Script started executing...")
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        print("🛑 Bot stopped by user")
     except Exception as e:
-        logger.error(f"Bot crashed: {e}")
+        print(f"💥 Fatal error: {e}")
