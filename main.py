@@ -8,10 +8,67 @@ import time
 from datetime import datetime
 import sys
 
-# Configuration - Keep your existing config code...
-# [আপনার existing configuration code এখানে রাখুন]
+# ==================== CONFIGURATION FIRST ====================
+def get_env_var(key, default=""):
+    return os.environ.get(key, default)
 
-# Pyrogram Client - FIXED
+def get_int_env(key, default=0):
+    value = os.environ.get(key, str(default))
+    try:
+        return int(value) if value else default
+    except ValueError:
+        return default
+
+# REQUIRED VARIABLES - DEFINE THEM AT THE TOP
+BOT_TOKEN = get_env_var("BOT_TOKEN", "default_token_placeholder")
+API_ID = get_int_env("API_ID", 1234567)  # Define here
+API_HASH = get_env_var("API_HASH", "default_hash_placeholder")
+
+# Check if using default values
+if BOT_TOKEN == "default_token_placeholder" or API_ID == 1234567 or API_HASH == "default_hash_placeholder":
+    print("❌ ERROR: Please set Environment Variables in Koyeb!")
+    print("Required: API_ID, API_HASH, BOT_TOKEN")
+    sys.exit(1)
+
+# Optional variables
+OWNER_ID = get_int_env("OWNER_ID", 7945670631)
+PORT = int(os.environ.get("PORT", 8080))
+
+# Channel IDs
+CHANNEL_ID = -1003279353938
+FORCE_SUB_CHANNEL_1 = -1003483616299
+
+# Other settings
+START_PIC = get_env_var("START_PIC", "https://files.catbox.moe/ufzpkn.jpg")
+F_PIC = get_env_var("FORCE_PIC", "https://files.catbox.moe/ufzpkn.jpg")
+
+# Admins
+ADMINS = [OWNER_ID]
+admins_str = os.environ.get("ADMINS", "")
+if admins_str:
+    try:
+        additional_admins = [int(x.strip()) for x in admins_str.split() if x.strip()]
+        ADMINS.extend(additional_admins)
+        ADMINS = list(dict.fromkeys(ADMINS))
+    except ValueError:
+        pass
+
+# Messages
+START_MSG = get_env_var("START_MESSAGE", "<b>Hi {first}! 🤖 I am an Advanced File Store Bot</b>")
+FORCE_MSG = get_env_var("FORCE_SUB_MESSAGE", "📢 Please join our channels first to use this bot!")
+
+# Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s - %(levelname)s] - %(name)s - %(message)s",
+    datefmt='%d-%b-%y %H:%M:%S',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+
+logger = logging.getLogger(__name__)
+
+# ==================== NOW CREATE CLIENT ====================
+# NOW API_ID, API_HASH, BOT_TOKEN are defined
 app = Client(
     "file_store_bot",
     api_id=API_ID,
@@ -21,7 +78,8 @@ app = Client(
     workers=3
 )
 
-# Bot start time for uptime
+# ==================== REST OF YOUR CODE ====================
+# Bot start time
 start_time = time.time()
 
 async def is_subscribed(user_id: int) -> bool:
@@ -63,7 +121,7 @@ async def get_channel_username(channel_id: int):
         logger.error(f"Error getting channel username: {e}")
         return "unknown"
 
-# FIXED: Remove type annotations from handler parameters
+# Start command handler
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     user_id = message.from_user.id
@@ -100,105 +158,73 @@ async def start_command(client, message):
         ]])
     )
 
-# FIXED: Callback handlers
-@app.on_callback_query(filters.regex("check_sub"))
-async def check_sub_callback(client, query):
-    user_id = query.from_user.id
-    first_name = query.from_user.first_name
+# ... REST OF YOUR HANDLERS (same as before) ...
+
+# Simple HTTP server for health checks
+async def start_web_server():
+    try:
+        from aiohttp import web
+        
+        async def health_check(request):
+            return web.Response(text="🤖 Bot is running!")
+        
+        app_web = web.Application()
+        app_web.router.add_get('/', health_check)
+        app_web.router.add_get('/health', health_check)
+        
+        runner = web.AppRunner(app_web)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', PORT)
+        await site.start()
+        logger.info(f"🌐 Health check server running on port {PORT}")
+        return runner
+    except ImportError:
+        logger.warning("aiohttp not installed, health checks disabled")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to start web server: {e}")
+        return None
+
+# Start the bot
+async def main():
+    logger.info("🚀 Starting File Store Bot...")
+    logger.info(f"📢 Main Channel: {CHANNEL_ID}")
+    logger.info(f"🔔 Force Sub: {FORCE_SUB_CHANNEL_1}")
     
-    if await is_subscribed(user_id):
-        await query.message.edit_caption(
-            caption=START_MSG.format(first=first_name),
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
-                InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
-            ], [
-                InlineKeyboardButton("ℹ️ About", callback_data="about")
-            ]])
-        )
-    else:
-        await query.answer("❌ Please join our channel first!", show_alert=True)
-
-@app.on_callback_query(filters.regex("about"))
-async def about_callback(client, query):
-    about_text = """
-<b>🤖 About This Bot</b>
-
-<b>📝 Language:</b> Python 3
-<b>📚 Framework:</b> Pyrogram
-<b>🚀 Host:</b> Koyeb
-
-<b>👨‍💻 Developer:</b> @Rakibul51624
-<b>📢 Channel:</b> @RHmovieHDOFFICIAL
-
-This bot can store files and forward them to users."""
-    
-    await query.message.edit_caption(
-        caption=about_text,
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🔙 Back", callback_data="back_to_start")
-        ]])
-    )
-
-@app.on_callback_query(filters.regex("back_to_start"))
-async def back_to_start(client, query):
-    first_name = query.from_user.first_name
-    await query.message.edit_caption(
-        caption=START_MSG.format(first=first_name),
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
-            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
-        ], [
-            InlineKeyboardButton("ℹ️ About", callback_data="about")
-        ]])
-    )
-
-# FIXED: Stats command
-@app.on_message(filters.command("stats") & filters.private & filters.user(ADMINS))
-async def stats_command(client, message):
-    uptime = get_uptime()
-    
-    stats_text = f"""
-<b>🤖 Bot Statistics</b>
-
-<b>⏰ Uptime:</b> {uptime}
-<b>🛠️ Admin Count:</b> {len(ADMINS)}
-<b>📢 Main Channel:</b> {CHANNEL_ID}
-<b>🔔 Force Sub:</b> {FORCE_SUB_CHANNEL_1}
-<b>🌐 Port:</b> {PORT}
-"""
-    
-    await message.reply_text(stats_text)
-
-# FIXED: File store functionality
-@app.on_message(filters.private & filters.user(ADMINS) & (filters.document | filters.video | filters.audio | filters.photo))
-async def store_file(client, message):
-    """Store files sent by admins"""
-    if not CHANNEL_ID:
-        await message.reply_text("❌ CHANNEL_ID not configured!")
-        return
+    # Start web server for health checks
+    web_runner = await start_web_server()
     
     try:
-        # Forward file to channel
-        forwarded_msg = await message.forward(CHANNEL_ID)
+        await app.start()
+        bot_info = await app.get_me()
+        logger.info(f"🤖 Bot Started Successfully! @{bot_info.username}")
         
-        file_link = f"https://t.me/c/{str(CHANNEL_ID)[4:]}/{forwarded_msg.id}"
+        print(f"""
+╔══════════════════════╗
+║   FILE STORE BOT     ║
+║      Started!        ║
+╠══════════════════════╣
+║ 🤖 Bot: @{bot_info.username}
+║ 👤 Owner: {OWNER_ID}
+║ 👥 Admins: {len(ADMINS)}
+║ 📢 Main: {CHANNEL_ID}
+║ 🔔 Force Sub: {FORCE_SUB_CHANNEL_1}
+║ 🌐 Port: {PORT}
+║ 🚀 Host: Koyeb
+╚══════════════════════╝
+        """)
         
-        await message.reply_text(
-            f"✅ File stored successfully!\n\n"
-            f"📁 File ID: `{forwarded_msg.id}`\n"
-            f"🔗 Direct Link: {file_link}",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("📂 View in Channel", url=file_link)
-            ]])
-        )
+        # Keep the bot running
+        await idle()
         
     except Exception as e:
-        await message.reply_text(f"❌ Error storing file: {e}")
-        logger.error(f"File storage error: {e}")
-
-# Keep your existing web server and main function...
-# [আপনার existing web server and main function code এখানে রাখুন]
+        logger.error(f"❌ Bot failed to start: {e}")
+    finally:
+        # Cleanup
+        if web_runner:
+            await web_runner.cleanup()
+        await app.stop()
+        logger.info("👋 Bot stopped")
 
 if __name__ == "__main__":
     try:
