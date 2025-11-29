@@ -78,24 +78,320 @@ app = Client(
     workers=3
 )
 
-# ==================== EMERGENCY DEBUGGING ====================
+# ==================== ALL COMMANDS ====================
+
+# Start command
+@app.on_message(filters.command("start") & filters.private)
+async def start_command(client, message):
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name
+    
+    logger.info(f"🚀 /start from {user_id} ({first_name})")
+    
+    # Check subscription
+    if not await is_subscribed(user_id):
+        buttons = []
+        
+        if FORCE_SUB_CHANNEL_1:
+            channel_username = await get_channel_username(FORCE_SUB_CHANNEL_1)
+            buttons.append([InlineKeyboardButton("📢 Join Our Channel", url=f"https://t.me/{channel_username}")])
+        
+        buttons.append([InlineKeyboardButton("🔄 Try Again", callback_data="check_sub")])
+        
+        await message.reply_photo(
+            photo=F_PIC,
+            caption=FORCE_MSG.format(first=first_name),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        return
+    
+    # User is subscribed - show start message
+    await message.reply_photo(
+        photo=START_PIC,
+        caption=START_MSG.format(first=first_name),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
+            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
+        ], [
+            InlineKeyboardButton("ℹ️ About", callback_data="about"),
+            InlineKeyboardButton("📖 Help", callback_data="help")
+        ]])
+    )
+
+# Help command
+@app.on_message(filters.command("help") & filters.private)
+async def help_command(client, message):
+    help_text = """
+<b>📖 Help Guide</b>
+
+<b>Available Commands:</b>
+/start - Start the bot
+/help - Show this help message  
+/stats - Bot statistics (Admins only)
+/id - Get your user ID
+/broadcast - Broadcast message (Admins only)
+
+<b>For Users:</b>
+• Join our channel to access the bot
+• Search files using inline mode
+
+<b>For Admins:</b>
+• Send any file to store it in channel
+• Use /broadcast to send messages
+• Use /stats to check bot status
+"""
+    
+    await message.reply_text(help_text)
+
+# ID command - Get user ID
+@app.on_message(filters.command("id") & filters.private)
+async def id_command(client, message):
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name
+    
+    await message.reply_text(
+        f"<b>👤 Your Information</b>\n\n"
+        f"<b>First Name:</b> {first_name}\n"
+        f"<b>User ID:</b> <code>{user_id}</code>\n"
+        f"<b>Username:</b> @{message.from_user.username if message.from_user.username else 'N/A'}"
+    )
+
+# Stats command for admin
+@app.on_message(filters.command("stats") & filters.private & filters.user(ADMINS))
+async def stats_command(client, message):
+    uptime = get_uptime()
+    
+    stats_text = f"""
+<b>🤖 Bot Statistics</b>
+
+<b>⏰ Uptime:</b> {uptime}
+<b>🛠️ Admin Count:</b> {len(ADMINS)}
+<b>📢 Main Channel:</b> {CHANNEL_ID}
+<b>🔔 Force Sub:</b> {FORCE_SUB_CHANNEL_1}
+<b>🌐 Port:</b> {PORT}
+<b>🚀 Host:</b> Koyeb
+"""
+    
+    await message.reply_text(stats_text)
+
+# Broadcast command for admin
+@app.on_message(filters.command("broadcast") & filters.private & filters.user(ADMINS))
+async def broadcast_command(client, message):
+    if len(message.command) < 2:
+        await message.reply_text(
+            "📢 <b>Broadcast Usage:</b>\n\n"
+            "<code>/broadcast your message here</code>\n\n"
+            "Example:\n"
+            "<code>/broadcast Hello everyone! New update available.</code>"
+        )
+        return
+    
+    broadcast_text = message.text.split(' ', 1)[1]
+    confirm_text = f"""
+<b>📢 Broadcast Preview:</b>
+
+{broadcast_text}
+
+<b>Total Admins:</b> {len(ADMINS)}
+
+<b>Confirm broadcast?</b>
+"""
+    
+    await message.reply_text(
+        confirm_text,
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Yes, Send", callback_data=f"broadcast_confirm_{message.id}"),
+            InlineKeyboardButton("❌ Cancel", callback_data="broadcast_cancel")
+        ]])
+    )
+
+# Ping command - Check bot response time
+@app.on_message(filters.command("ping") & filters.private)
+async def ping_command(client, message):
+    start_time = time.time()
+    msg = await message.reply_text("🏓 Pong!")
+    end_time = time.time()
+    
+    ping_time = round((end_time - start_time) * 1000, 2)
+    
+    await msg.edit_text(f"🏓 <b>Pong!</b>\n\n⏱️ <b>Response Time:</b> {ping_time}ms")
+
+# Test command - Emergency testing
 @app.on_message(filters.command("test") & filters.private)
 async def test_command(client, message):
     """Emergency test command"""
     logger.info(f"🎯 TEST COMMAND RECEIVED FROM: {message.from_user.id}")
-    await message.reply_text("🚨 BOT IS WORKING! Test successful!")
+    await message.reply_text("✅ <b>Bot is working perfectly!</b>\n\nAll systems operational! 🚀")
 
+# Echo all messages for testing
 @app.on_message(filters.text & filters.private)
 async def echo_all_messages(client, message):
     """Echo all text messages for testing"""
     user_id = message.from_user.id
     text = message.text
-    logger.info(f"📩 Message from {user_id}: {text}")
     
-    if text not in ['/start', '/test', '/stats']:
-        await message.reply_text(f"Echo: {text}")
+    # Ignore commands
+    if text.startswith('/'):
+        return
+        
+    logger.info(f"📩 Message from {user_id}: {text}")
+    await message.reply_text(f"🔁 <b>Echo:</b> {text}")
 
-# ==================== REST OF YOUR CODE ====================
+# ==================== CALLBACK HANDLERS ====================
+
+@app.on_callback_query(filters.regex("check_sub"))
+async def check_sub_callback(client, query):
+    user_id = query.from_user.id
+    first_name = query.from_user.first_name
+    
+    if await is_subscribed(user_id):
+        await query.message.edit_caption(
+            caption=START_MSG.format(first=first_name),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
+                InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
+            ], [
+                InlineKeyboardButton("ℹ️ About", callback_data="about"),
+                InlineKeyboardButton("📖 Help", callback_data="help")
+            ]])
+        )
+    else:
+        await query.answer("❌ Please join our channel first!", show_alert=True)
+
+@app.on_callback_query(filters.regex("about"))
+async def about_callback(client, query):
+    about_text = """
+<b>🤖 About This Bot</b>
+
+<b>📝 Language:</b> Python 3
+<b>📚 Framework:</b> Pyrogram
+<b>🚀 Host:</b> Koyeb
+
+<b>👨‍💻 Developer:</b> @Rakibul51624
+<b>📢 Channel:</b> @RHmovieHDOFFICIAL
+
+<b>🌟 Features:</b>
+• File Storage System
+• Force Subscription
+• Broadcast Messages
+• Multi Admin Support
+
+This bot can store files and forward them to users."""
+    
+    await query.message.edit_caption(
+        caption=about_text,
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔙 Back", callback_data="back_to_start"),
+            InlineKeyboardButton("📖 Help", callback_data="help")
+        ]])
+    )
+
+@app.on_callback_query(filters.regex("help"))
+async def help_callback(client, query):
+    help_text = """
+<b>📖 Help Guide</b>
+
+<b>Available Commands:</b>
+/start - Start the bot
+/help - Show this help message  
+/stats - Bot statistics (Admins only)
+/id - Get your user ID
+/ping - Check bot response time
+/broadcast - Broadcast message (Admins only)
+
+<b>For Users:</b>
+• Join our channel to access the bot
+• Use /id to get your user ID
+
+<b>For Admins:</b>
+• Send any file to store it in channel
+• Use /broadcast to send messages
+• Use /stats to check bot status
+"""
+    
+    await query.message.edit_caption(
+        caption=help_text,
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔙 Back", callback_data="back_to_start"),
+            InlineKeyboardButton("ℹ️ About", callback_data="about")
+        ]])
+    )
+
+@app.on_callback_query(filters.regex("back_to_start"))
+async def back_to_start(client, query):
+    first_name = query.from_user.first_name
+    await query.message.edit_caption(
+        caption=START_MSG.format(first=first_name),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
+            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
+        ], [
+            InlineKeyboardButton("ℹ️ About", callback_data="about"),
+            InlineKeyboardButton("📖 Help", callback_data="help")
+        ]])
+    )
+
+# Broadcast confirmation handler
+@app.on_callback_query(filters.regex("broadcast_confirm_"))
+async def broadcast_confirm(client, query):
+    message_id = int(query.data.split("_")[2])
+    original_message = await app.get_messages(query.message.chat.id, message_id)
+    broadcast_text = original_message.text.split(' ', 1)[1]
+    
+    await query.message.edit_text("📢 Sending broadcast to admins...")
+    
+    success = 0
+    failed = 0
+    
+    for admin_id in ADMINS:
+        try:
+            await app.send_message(admin_id, f"📢 <b>Broadcast Message:</b>\n\n{broadcast_text}")
+            success += 1
+        except Exception as e:
+            logger.error(f"Failed to send broadcast to {admin_id}: {e}")
+            failed += 1
+    
+    await query.message.edit_text(
+        f"📊 <b>Broadcast Completed!</b>\n\n"
+        f"✅ <b>Success:</b> {success}\n"
+        f"❌ <b>Failed:</b> {failed}\n"
+        f"👥 <b>Total Admins:</b> {len(ADMINS)}"
+    )
+
+@app.on_callback_query(filters.regex("broadcast_cancel"))
+async def broadcast_cancel(client, query):
+    await query.message.edit_text("❌ Broadcast cancelled.")
+
+# ==================== FILE STORE FUNCTIONALITY ====================
+
+@app.on_message(filters.private & filters.user(ADMINS) & (filters.document | filters.video | filters.audio | filters.photo))
+async def store_file(client, message):
+    """Store files sent by admins"""
+    if not CHANNEL_ID:
+        await message.reply_text("❌ CHANNEL_ID not configured!")
+        return
+    
+    try:
+        # Forward file to channel
+        forwarded_msg = await message.forward(CHANNEL_ID)
+        
+        file_link = f"https://t.me/c/{str(CHANNEL_ID)[4:]}/{forwarded_msg.id}"
+        
+        await message.reply_text(
+            f"✅ <b>File stored successfully!</b>\n\n"
+            f"📁 <b>File ID:</b> <code>{forwarded_msg.id}</code>\n"
+            f"🔗 <b>Direct Link:</b> {file_link}",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📂 View in Channel", url=file_link)
+            ]])
+        )
+        
+    except Exception as e:
+        await message.reply_text(f"❌ Error storing file: {e}")
+        logger.error(f"File storage error: {e}")
+
+# ==================== UTILITY FUNCTIONS ====================
+
 # Bot start time
 start_time = time.time()
 
@@ -138,141 +434,8 @@ async def get_channel_username(channel_id: int):
         logger.error(f"Error getting channel username: {e}")
         return "unknown"
 
-# Start command handler
-@app.on_message(filters.command("start") & filters.private)
-async def start_command(client, message):
-    user_id = message.from_user.id
-    first_name = message.from_user.first_name
-    
-    logger.info(f"🚀 /start from {user_id} ({first_name})")
-    
-    # Check subscription
-    if not await is_subscribed(user_id):
-        buttons = []
-        
-        if FORCE_SUB_CHANNEL_1:
-            channel_username = await get_channel_username(FORCE_SUB_CHANNEL_1)
-            buttons.append([InlineKeyboardButton("📢 Join Our Channel", url=f"https://t.me/{channel_username}")])
-        
-        buttons.append([InlineKeyboardButton("🔄 Try Again", callback_data="check_sub")])
-        
-        await message.reply_photo(
-            photo=F_PIC,
-            caption=FORCE_MSG.format(first=first_name),
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        return
-    
-    # User is subscribed - show start message
-    await message.reply_photo(
-        photo=START_PIC,
-        caption=START_MSG.format(first=first_name),
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
-            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
-        ], [
-            InlineKeyboardButton("ℹ️ About", callback_data="about")
-        ]])
-    )
+# ==================== WEB SERVER FOR HEALTH CHECKS ====================
 
-# Callback query handlers
-@app.on_callback_query(filters.regex("check_sub"))
-async def check_sub_callback(client, query):
-    user_id = query.from_user.id
-    first_name = query.from_user.first_name
-    
-    if await is_subscribed(user_id):
-        await query.message.edit_caption(
-            caption=START_MSG.format(first=first_name),
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
-                InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
-            ], [
-                InlineKeyboardButton("ℹ️ About", callback_data="about")
-            ]])
-        )
-    else:
-        await query.answer("❌ Please join our channel first!", show_alert=True)
-
-@app.on_callback_query(filters.regex("about"))
-async def about_callback(client, query):
-    about_text = """
-<b>🤖 About This Bot</b>
-
-<b>📝 Language:</b> Python 3
-<b>📚 Framework:</b> Pyrogram
-<b>🚀 Host:</b> Koyeb
-
-<b>👨‍💻 Developer:</b> @Rakibul51624
-<b>📢 Channel:</b> @RHmovieHDOFFICIAL
-
-This bot can store files and forward them to users."""
-    
-    await query.message.edit_caption(
-        caption=about_text,
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🔙 Back", callback_data="back_to_start")
-        ]])
-    )
-
-@app.on_callback_query(filters.regex("back_to_start"))
-async def back_to_start(client, query):
-    first_name = query.from_user.first_name
-    await query.message.edit_caption(
-        caption=START_MSG.format(first=first_name),
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("📢 Updates Channel", url="https://t.me/RHmovieHDOFFICIAL"),
-            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/Rakibul51624")
-        ], [
-            InlineKeyboardButton("ℹ️ About", callback_data="about")
-        ]])
-    )
-
-# Stats command for owner
-@app.on_message(filters.command("stats") & filters.private & filters.user(ADMINS))
-async def stats_command(client, message):
-    uptime = get_uptime()
-    
-    stats_text = f"""
-<b>🤖 Bot Statistics</b>
-
-<b>⏰ Uptime:</b> {uptime}
-<b>🛠️ Admin Count:</b> {len(ADMINS)}
-<b>📢 Main Channel:</b> {CHANNEL_ID}
-<b>🔔 Force Sub:</b> {FORCE_SUB_CHANNEL_1}
-<b>🌐 Port:</b> {PORT}
-"""
-    
-    await message.reply_text(stats_text)
-
-# File store functionality
-@app.on_message(filters.private & filters.user(ADMINS) & (filters.document | filters.video | filters.audio | filters.photo))
-async def store_file(client, message):
-    """Store files sent by admins"""
-    if not CHANNEL_ID:
-        await message.reply_text("❌ CHANNEL_ID not configured!")
-        return
-    
-    try:
-        # Forward file to channel
-        forwarded_msg = await message.forward(CHANNEL_ID)
-        
-        file_link = f"https://t.me/c/{str(CHANNEL_ID)[4:]}/{forwarded_msg.id}"
-        
-        await message.reply_text(
-            f"✅ File stored successfully!\n\n"
-            f"📁 File ID: `{forwarded_msg.id}`\n"
-            f"🔗 Direct Link: {file_link}",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("📂 View in Channel", url=file_link)
-            ]])
-        )
-        
-    except Exception as e:
-        await message.reply_text(f"❌ Error storing file: {e}")
-        logger.error(f"File storage error: {e}")
-
-# Simple HTTP server for health checks
 async def start_web_server():
     try:
         from aiohttp import web
@@ -297,7 +460,8 @@ async def start_web_server():
         logger.error(f"Failed to start web server: {e}")
         return None
 
-# Start the bot
+# ==================== START THE BOT ====================
+
 async def main():
     logger.info("🚀 Starting File Store Bot...")
     
