@@ -1,10 +1,4 @@
-pyrogram==2.0.106
-tgcrypto
-aiohttp==3.9.5
-pyaes
-pysocks
-Pillow
-urllib3
-certifi
-idna
-python-dotenv
+pyrogram==1.4.16
+tgcrypto==1.2.5
+aiohttp==3.9.1
+python-dotenv==1.0.0
