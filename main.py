@@ -7,10 +7,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 print("🤖 Starting File Store Bot...")
 time.sleep(25)
 
-# Configuration
+# Configuration - FIXED SYNTAX
 API_ID = int(os.environ["API_ID"])
-API_HASH = os.environ["API_HASH"])
-BOT_TOKEN = os.environ["BOT_TOKEN"])
+API_HASH = os.environ["API_HASH"]
+BOT_TOKEN = os.environ["BOT_TOKEN"]
 OWNER_ID = int(os.environ.get("OWNER_ID", 7945670631))
 
 # Your channels
